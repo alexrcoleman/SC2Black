@@ -64,7 +64,7 @@ if not os.path.exists(SNAPSHOT):
   os.makedirs(SNAPSHOT)
 
 
-def run_thread(agent, map_name, visualize):
+def run_thread(agent, map_name, visualize, stats):
   with sc2_env.SC2Env(
     map_name=map_name,
     agent_interface_format=sc2_env.parse_agent_interface_format(
@@ -74,7 +74,6 @@ def run_thread(agent, map_name, visualize):
     step_mul=FLAGS.step_mul,
     visualize=visualize) as env:
     env = available_actions_printer.AvailableActionsPrinter(env)
-
     # Only for a single player!
     replay_buffer = []
     for recorder, is_done in run_loop([agent], env, MAX_AGENT_STEPS):
@@ -89,10 +88,19 @@ def run_thread(agent, map_name, visualize):
           # Learning rate schedule
           learning_rate = FLAGS.learning_rate * (1 - 0.9 * counter / FLAGS.max_steps)
           agent.update(replay_buffer, FLAGS.discount, learning_rate, counter)
-
           obs = recorder[-1].observation
           score = obs["score_cumulative"][0]
           print('Your score is '+str(score)+'! counter is ' + str(counter))
+          if counter == 1:
+            global average
+            average = 0			
+          if counter % 100 == 0:
+            print('Average is ' + str(average))
+            stats.write('Average score for tests ' + str(counter - 100) + '-' + str(counter)
+                      +  ': ' + str(average) + '\n')
+            average = score
+          else:
+            average = (average * ((counter - 1) % 100) + score)/(counter % 010)
 
           replay_buffer = []
           if counter % FLAGS.snapshot_step == 1:
@@ -118,6 +126,9 @@ def _main(unused_argv):
   agent_module, agent_name = FLAGS.agent.rsplit(".", 1)
   agent_cls = getattr(importlib.import_module(agent_module), agent_name)
 
+  # Open text file
+  stats = open("scoreStatistic.txt", mode='w')
+
   agents = []
   for i in range(PARALLEL):
     agent = agent_cls(FLAGS.training, FLAGS.minimap_resolution, FLAGS.screen_resolution)
@@ -140,13 +151,13 @@ def _main(unused_argv):
   # Run threads
   threads = []
   for i in range(PARALLEL - 1):
-    t = threading.Thread(target=run_thread, args=(agents[i], FLAGS.map, False))
+    t = threading.Thread(target=run_thread, args=(agents[i], FLAGS.map, False, stats))
     threads.append(t)
     t.daemon = True
     t.start()
     time.sleep(5)
 
-  run_thread(agents[-1], FLAGS.map, FLAGS.render)
+  run_thread(agents[-1], FLAGS.map, FLAGS.render, stats)
 
   for t in threads:
     t.join()
