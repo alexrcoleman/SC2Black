@@ -13,14 +13,14 @@ import utils as U
 
 
 class A3CAgent(object):
+
+
   """An agent specifically for solving the mini-game maps."""
   def __init__(self, training, msize, ssize, name='A3C/A3CAgent'):
     self.name = name
     self.training = training
     self.summary = []
-    # Minimap size, screen size and info size
-    assert msize == ssize
-    self.msize = msize
+    # Screen size and info size
     self.ssize = ssize
     self.isize = len(actions.FUNCTIONS)
 
@@ -47,12 +47,11 @@ class A3CAgent(object):
         assert tf.get_variable_scope().reuse
 
       # Set inputs of networks
-      self.minimap = tf.placeholder(tf.float32, [None, U.minimap_channel(), self.msize, self.msize], name='minimap')
-      self.screen = tf.placeholder(tf.float32, [None, U.screen_channel(), self.ssize, self.ssize], name='screen')
+      self.screen = tf.placeholder(tf.float32, [None, len(U.usefull_screens)+1, self.ssize, self.ssize], name='screen')
       self.info = tf.placeholder(tf.float32, [None, self.isize], name='info')
 
       # Build networks
-      net = build_net(self.minimap, self.screen, self.info, self.msize, self.ssize, len(actions.FUNCTIONS), ntype)
+      net = build_net(self.screen, self.info, self.ssize, len(actions.FUNCTIONS), ntype)
       self.spatial_action, self.non_spatial_action, self.value = net
 
       # Set targets and masks
@@ -102,15 +101,15 @@ class A3CAgent(object):
 
 
   def step(self, obs):
-    minimap = np.array(obs.observation['feature_minimap'], dtype=np.float32)
-    minimap = np.expand_dims(U.preprocess_minimap(minimap), axis=0)
+
     screen = np.array(obs.observation['feature_screen'], dtype=np.float32)
     screen = np.expand_dims(U.preprocess_screen(screen), axis=0)
+    #print("the length is " , len(screen[0]) )
     # TODO: only use available actions
     info = np.zeros([1, self.isize], dtype=np.float32)
     info[0, obs.observation['available_actions']] = 1
 
-    feed = {self.minimap: minimap,
+    feed = {
             self.screen: screen,
             self.info: info}
     non_spatial_action, spatial_action = self.sess.run(
@@ -153,20 +152,17 @@ class A3CAgent(object):
     if obs.last():
       R = 0
     else:
-      minimap = np.array(obs.observation['feature_minimap'], dtype=np.float32)
-      minimap = np.expand_dims(U.preprocess_minimap(minimap), axis=0)
       screen = np.array(obs.observation['feature_screen'], dtype=np.float32)
       screen = np.expand_dims(U.preprocess_screen(screen), axis=0)
       info = np.zeros([1, self.isize], dtype=np.float32)
       info[0, obs.observation['available_actions']] = 1
 
-      feed = {self.minimap: minimap,
+      feed = {
               self.screen: screen,
               self.info: info}
       R = self.sess.run(self.value, feed_dict=feed)[0]
 
     # Compute targets and masks
-    minimaps = []
     screens = []
     infos = []
 
@@ -180,14 +176,11 @@ class A3CAgent(object):
 
     rbs.reverse()
     for i, [obs, action, next_obs] in enumerate(rbs):
-      minimap = np.array(obs.observation['feature_minimap'], dtype=np.float32)
-      minimap = np.expand_dims(U.preprocess_minimap(minimap), axis=0)
       screen = np.array(obs.observation['feature_screen'], dtype=np.float32)
       screen = np.expand_dims(U.preprocess_screen(screen), axis=0)
       info = np.zeros([1, self.isize], dtype=np.float32)
       info[0, obs.observation['available_actions']] = 1
 
-      minimaps.append(minimap)
       screens.append(screen)
       infos.append(info)
 
@@ -208,12 +201,11 @@ class A3CAgent(object):
           valid_spatial_action[i] = 1
           spatial_action_selected[i, ind] = 1
 
-    minimaps = np.concatenate(minimaps, axis=0)
     screens = np.concatenate(screens, axis=0)
     infos = np.concatenate(infos, axis=0)
 
     # Train
-    feed = {self.minimap: minimaps,
+    feed = {
             self.screen: screens,
             self.info: infos,
             self.value_target: value_target,
