@@ -31,8 +31,8 @@ flags.DEFINE_string("snapshot_path", "./snapshot/", "Path for snapshot.")
 flags.DEFINE_string("log_path", "./log/", "Path for log.")
 flags.DEFINE_string("device", "0", "Device for training.")
 
-flags.DEFINE_string("map", "MoveToBeacon", "Name of a map to use.")
-flags.DEFINE_bool("render", True, "Whether to render with pygame.")
+flags.DEFINE_string("map", "CollectMineralShards", "Name of a map to use.")
+flags.DEFINE_bool("render", False, "Whether to render with pygame.")
 flags.DEFINE_integer("screen_resolution", 64, "Resolution for screen feature layers.")
 flags.DEFINE_integer("minimap_resolution", 64, "Resolution for minimap feature layers.")
 flags.DEFINE_integer("step_mul", 8, "Game steps per agent step.")
@@ -43,7 +43,7 @@ flags.DEFINE_integer("max_agent_steps", 60, "Total agent steps.")
 
 flags.DEFINE_bool("profile", False, "Whether to turn on code profiling.")
 flags.DEFINE_bool("trace", False, "Whether to trace the code execution.")
-flags.DEFINE_integer("parallel", 32, "How many instances to run in parallel.")
+flags.DEFINE_integer("parallel", 4, "How many instances to run in parallel.")
 flags.DEFINE_bool("save_replay", False, "Whether to save a replay at the end.")
 
 FLAGS(sys.argv)
@@ -93,7 +93,7 @@ def run_thread(agent, map_name, visualize, stats):
           print('Your score is '+str(score)+'! counter is ' + str(counter))
           if counter == 1:
             global average
-            average = 0			
+            average = 0
           if counter % 100 == 0:
             print('Average is ' + str(average))
             stats.write('Average score for tests ' + str(counter - 100) + '-' + str(counter)
