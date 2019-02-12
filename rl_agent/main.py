@@ -100,7 +100,7 @@ def run_thread(agent, map_name, visualize, stats):
                       +  ': ' + str(average) + '\n')
             average = score
           else:
-            average = (average * ((counter - 1) % 100) + score)/(counter % 010)
+            average = (average * ((counter - 1) % 100) + score)/(counter % 100)
 
           replay_buffer = []
           if counter % FLAGS.snapshot_step == 1:
