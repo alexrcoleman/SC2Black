@@ -7,6 +7,8 @@ import sys
 import time
 import importlib
 import threading
+import matplotlib.pyplot as plt
+import numpy as np
 
 from absl import app
 from absl import flags
@@ -15,7 +17,6 @@ from pysc2.env import available_actions_printer
 from pysc2.env import sc2_env
 from pysc2.lib import stopwatch
 import tensorflow as tf
-
 from run_loop import run_loop
 
 COUNTER = 0
@@ -35,15 +36,15 @@ flags.DEFINE_string("map", "CollectMineralShards", "Name of a map to use.")
 flags.DEFINE_bool("render", False, "Whether to render with pygame.")
 flags.DEFINE_integer("screen_resolution", 64, "Resolution for screen feature layers.")
 flags.DEFINE_integer("minimap_resolution", 64, "Resolution for minimap feature layers.")
-flags.DEFINE_integer("step_mul", 8, "Game steps per agent step.")
+flags.DEFINE_integer("step_mul", 4, "Game steps per agent step.")
 
 flags.DEFINE_string("agent", "agents.a3c_agent.A3CAgent", "Which agent to run.")
 flags.DEFINE_string("net", "fcn", "atari or fcn.")
-flags.DEFINE_integer("max_agent_steps", 60, "Total agent steps.")
+flags.DEFINE_integer("max_agent_steps", 60*3, "Total agent steps.")
 
 flags.DEFINE_bool("profile", False, "Whether to turn on code profiling.")
 flags.DEFINE_bool("trace", False, "Whether to trace the code execution.")
-flags.DEFINE_integer("parallel", 4, "How many instances to run in parallel.")
+flags.DEFINE_integer("parallel", 1, "How many instances to run in parallel.")
 flags.DEFINE_bool("save_replay", False, "Whether to save a replay at the end.")
 
 FLAGS(sys.argv)
@@ -63,8 +64,9 @@ if not os.path.exists(LOG):
 if not os.path.exists(SNAPSHOT):
   os.makedirs(SNAPSHOT)
 
-
+average = 0
 def run_thread(agent, map_name, visualize, stats):
+  global COUNTER, average
   with sc2_env.SC2Env(
     map_name=map_name,
     agent_interface_format=sc2_env.parse_agent_interface_format(
@@ -82,7 +84,6 @@ def run_thread(agent, map_name, visualize, stats):
         if is_done:
           counter = 0
           with LOCK:
-            global COUNTER
             COUNTER += 1
             counter = COUNTER
           # Learning rate schedule
@@ -91,29 +92,51 @@ def run_thread(agent, map_name, visualize, stats):
           obs = recorder[-1].observation
           score = obs["score_cumulative"][0]
           print('Your score is '+str(score)+'! counter is ' + str(counter))
-          if counter == 1:
-            global average
-            average = 0
           if counter % 100 == 0:
             print('Average is ' + str(average))
             stats.write('Average score for tests ' + str(counter - 100) + '-' + str(counter)
                       +  ': ' + str(average) + '\n')
             average = score
           else:
-            average = (average * ((counter - 1) % 100) + score)/(counter % 010)
+            average = (average * ((counter - 1) % 100) + score)/(counter % 100)
 
           replay_buffer = []
           if counter % FLAGS.snapshot_step == 1:
             agent.save_model(SNAPSHOT, counter)
           if counter >= FLAGS.max_steps:
             break
+
+          # Randomly change the epsilon on different runs maybe?
+          #if np.random.randint(0,10) == 0:
+          #  agent.epsilon = [0,0]
+          #else:
+          #  agent.epsilon = [np.random.uniform(0,.1), np.random.uniform(0,.4)]
       elif is_done:
         obs = recorder[-1].observation
         score = obs["score_cumulative"][0]
         print('Your score is '+str(score)+'!')
+      if is_done:
+         addScore(obs["score_cumulative"][0])
+
     if FLAGS.save_replay:
       env.save_replay(agent.name)
 
+def addScore(score):
+    global scoreQueue, COUNTER
+    with LOCK:
+        scoreQueue.append(score)
+
+def runningAverage(list, size):
+    cnt = 0
+    sum = 0
+    nlist = []
+    for i in range(len(list)):
+        sum += list[i]
+        if i >= size:
+            sum -= list[i-size]
+        if i+1 >= size:
+            nlist.append(sum/size)
+    return nlist
 
 def _main(unused_argv):
   """Run agents"""
@@ -147,6 +170,8 @@ def _main(unused_argv):
   if not FLAGS.training or FLAGS.continuation:
     global COUNTER
     COUNTER = agent.load_model(SNAPSHOT)
+  global scoreQueue
+  scoreQueue = []
 
   # Run threads
   threads = []
@@ -161,6 +186,18 @@ def _main(unused_argv):
 
   for t in threads:
     t.join()
+
+
+  steps = min(FLAGS.max_agent_steps * FLAGS.step_mul, 1920)
+  print("Showing score graphs")
+  plt.title("Score over Time - %s x%d %.1fs" % (FLAGS.map, FLAGS.parallel, steps / 16))
+  plt.ylabel('Score')
+  plt.xlabel('Time')
+  plt.plot(scoreQueue)
+  plt.plot(runningAverage(scoreQueue, 8))
+
+  plt.legend(['Score', '8-game average'])
+  plt.show()
 
   if FLAGS.profile:
     print(stopwatch.sw)

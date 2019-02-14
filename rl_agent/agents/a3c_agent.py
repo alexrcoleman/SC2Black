@@ -11,6 +11,12 @@ from pysc2.lib import features
 from agents.network import build_net
 import utils as U
 
+# For computing new rewards:
+_PLAYER_SELF = features.PlayerRelative.SELF
+def _xy_locs(mask):
+  """Mask should be a set of bools from comparison with a feature layer."""
+  y, x = mask.nonzero()
+  return list(zip(x, y))
 
 class A3CAgent(object):
 
@@ -22,7 +28,7 @@ class A3CAgent(object):
     self.summary = []
     # Screen size and info size
     self.ssize = ssize
-    self.isize = len(actions.FUNCTIONS)
+    self.isize = len(U.useful_actions)
 
 
   def setup(self, sess, summary_writer):
@@ -39,7 +45,6 @@ class A3CAgent(object):
     # Epsilon schedule
     self.epsilon = [0.05, 0.2]
 
-
   def build_model(self, reuse, dev, ntype):
     with tf.variable_scope(self.name) and tf.device(dev):
       if reuse:
@@ -47,18 +52,20 @@ class A3CAgent(object):
         assert tf.get_variable_scope().reuse
 
       # Set inputs of networks
-      self.screen = tf.placeholder(tf.float32, [None, len(U.usefull_screens)+1, self.ssize, self.ssize], name='screen')
+      self.screen = tf.placeholder(tf.float32, [None, U.screen_channel(), self.ssize, self.ssize], name='screen')
       self.info = tf.placeholder(tf.float32, [None, self.isize], name='info')
+      # todo: actually put some inputs in this vec
+      self.extra_input = tf.placeholder(tf.float32, [None, 3], name='info')
 
       # Build networks
-      net = build_net(self.screen, self.info, self.ssize, len(actions.FUNCTIONS), ntype)
+      net = build_net(self.screen, self.info, self.extra_input, self.ssize, len(U.useful_actions), ntype)
       self.spatial_action, self.non_spatial_action, self.value = net
 
       # Set targets and masks
       self.valid_spatial_action = tf.placeholder(tf.float32, [None], name='valid_spatial_action')
       self.spatial_action_selected = tf.placeholder(tf.float32, [None, self.ssize**2], name='spatial_action_selected')
-      self.valid_non_spatial_action = tf.placeholder(tf.float32, [None, len(actions.FUNCTIONS)], name='valid_non_spatial_action')
-      self.non_spatial_action_selected = tf.placeholder(tf.float32, [None, len(actions.FUNCTIONS)], name='non_spatial_action_selected')
+      self.valid_non_spatial_action = tf.placeholder(tf.float32, [None, len(U.useful_actions)], name='valid_non_spatial_action')
+      self.non_spatial_action_selected = tf.placeholder(tf.float32, [None, len(U.useful_actions)], name='non_spatial_action_selected')
       self.value_target = tf.placeholder(tf.float32, [None], name='value_target')
 
       # Compute log probability
@@ -104,10 +111,8 @@ class A3CAgent(object):
 
     screen = np.array(obs.observation['feature_screen'], dtype=np.float32)
     screen = np.expand_dims(U.preprocess_screen(screen), axis=0)
-    #print("the length is " , len(screen[0]) )
-    # TODO: only use available actions
     info = np.zeros([1, self.isize], dtype=np.float32)
-    info[0, obs.observation['available_actions']] = 1
+    info[0, U.compressActions(obs.observation['available_actions'])] = 1
 
     feed = {
             self.screen: screen,
@@ -120,29 +125,41 @@ class A3CAgent(object):
     non_spatial_action = non_spatial_action.ravel()
     spatial_action = spatial_action.ravel()
     valid_actions = obs.observation['available_actions']
-    act_id = valid_actions[np.argmax(non_spatial_action[valid_actions])]
+    valid_actions = U.compressActions(valid_actions)
+
+    net_act_id = valid_actions[np.argmax(non_spatial_action[valid_actions])]
+    act_id = U.useful_actions[net_act_id]
+
     target = np.argmax(spatial_action)
     target = [int(target // self.ssize), int(target % self.ssize)]
 
-    if False:
-      print(actions.FUNCTIONS[act_id].name, target)
+    # show the action being chosen:
+    #  print(actions.FUNCTIONS[act_id].name, target)
 
     # Epsilon greedy exploration
     if self.training and np.random.rand() < self.epsilon[0]:
-      act_id = np.random.choice(valid_actions)
+      net_act_id = np.random.choice(valid_actions)
+      act_id = U.useful_actions[net_act_id]
+    if self.training and np.random.rand() < self.epsilon[0]:
+        target[0] = np.random.randint(0, self.ssize)
+        target[1] = np.random.randint(0, self.ssize)
     if self.training and np.random.rand() < self.epsilon[1]:
-      dy = np.random.randint(-4, 5)
+      dy = np.random.randint(-6, 7)
       target[0] = int(max(0, min(self.ssize-1, target[0]+dy)))
-      dx = np.random.randint(-4, 5)
+      dx = np.random.randint(-6, 7)
       target[1] = int(max(0, min(self.ssize-1, target[1]+dx)))
 
     # Set act_id and act_args
     act_args = []
     for arg in actions.FUNCTIONS[act_id].args:
+      # set the location of the action
       if arg.name in ('screen', 'minimap', 'screen2'):
         act_args.append([target[1], target[0]])
       else:
-        act_args.append([0])  # TODO: Be careful
+        # TODO: Handle this better with more output
+        # ex. control groups requires specifying both the control group
+        # id and whether you are selecting or setting the group
+        act_args.append([0])
     return actions.FunctionCall(act_id, act_args)
 
 
@@ -155,7 +172,7 @@ class A3CAgent(object):
       screen = np.array(obs.observation['feature_screen'], dtype=np.float32)
       screen = np.expand_dims(U.preprocess_screen(screen), axis=0)
       info = np.zeros([1, self.isize], dtype=np.float32)
-      info[0, obs.observation['available_actions']] = 1
+      info[0, U.compressActions(obs.observation['available_actions'])] = 1
 
       feed = {
               self.screen: screen,
@@ -171,28 +188,45 @@ class A3CAgent(object):
 
     valid_spatial_action = np.zeros([len(rbs)], dtype=np.float32)
     spatial_action_selected = np.zeros([len(rbs), self.ssize**2], dtype=np.float32)
-    valid_non_spatial_action = np.zeros([len(rbs), len(actions.FUNCTIONS)], dtype=np.float32)
-    non_spatial_action_selected = np.zeros([len(rbs), len(actions.FUNCTIONS)], dtype=np.float32)
+    valid_non_spatial_action = np.zeros([len(rbs), len(U.useful_actions)], dtype=np.float32)
+    non_spatial_action_selected = np.zeros([len(rbs), len(U.useful_actions)], dtype=np.float32)
 
     rbs.reverse()
     for i, [obs, action, next_obs] in enumerate(rbs):
       screen = np.array(obs.observation['feature_screen'], dtype=np.float32)
       screen = np.expand_dims(U.preprocess_screen(screen), axis=0)
       info = np.zeros([1, self.isize], dtype=np.float32)
-      info[0, obs.observation['available_actions']] = 1
+      info[0, U.compressActions(obs.observation['available_actions'])] = 1
 
       screens.append(screen)
       infos.append(info)
 
       reward = obs.reward
       act_id = action.function
+      net_act_id = U.compress_actions[act_id]
       act_args = action.arguments
+
+
+      player_relative = obs.observation.feature_screen.player_relative
+      marines = _xy_locs(player_relative == _PLAYER_SELF)
+      # ex. reward based on distance
+      if len(marines) >= 2 and False:
+        bonus = 0
+        for i in range(0,len(marines)):
+          for j in range(i+1,len(marines)):
+            bonus = bonus + np.linalg.norm(np.array(marines[i])-np.array(marines[j]))
+        bonus = bonus * .001
+        if reward > 0:
+          # scale by (1+bonus) so each shard collected rewards them 1 point +
+          # distance apart
+          reward = reward * (1 + bonus)
 
       value_target[i] = reward + disc * value_target[i-1]
 
       valid_actions = obs.observation["available_actions"]
+      valid_actions = U.compressActions(valid_actions)
       valid_non_spatial_action[i, valid_actions] = 1
-      non_spatial_action_selected[i, act_id] = 1
+      non_spatial_action_selected[i, net_act_id] = 1
 
       args = actions.FUNCTIONS[act_id].args
       for arg, act_arg in zip(args, act_args):

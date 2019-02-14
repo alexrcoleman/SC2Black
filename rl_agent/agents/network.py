@@ -6,14 +6,12 @@ import tensorflow as tf
 import tensorflow.contrib.layers as layers
 
 
-def build_net(screen, info, ssize, num_action, ntype):
-    return build_fcn( screen, info, ssize, num_action)
+def build_net(screen, info, extra_input, ssize, num_action, ntype):
+    return build_fcn( screen, info, extra_input, ssize, num_action)
 
-
-
-def build_fcn(screen, info, ssize, num_action):
+def build_fcn(screen, info, extra_input, ssize, num_action):
   # Extract features
-  scale_factor = .40
+  scale_factor = .4
 
   sconv1 = layers.conv2d(tf.transpose(screen, [0, 2, 3, 1]),
                          num_outputs=16,
@@ -25,6 +23,7 @@ def build_fcn(screen, info, ssize, num_action):
                          kernel_size=3,
                          stride=1,
                          scope='sconv2')
+  # TODO: Add extra_input
   info_fc = layers.fully_connected(layers.flatten(info),
                                    num_outputs=256,
                                    activation_fn=tf.tanh,
