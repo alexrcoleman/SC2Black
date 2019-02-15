@@ -22,13 +22,15 @@ class A3CAgent(object):
 
 
   """An agent specifically for solving the mini-game maps."""
-  def __init__(self, training, msize, ssize, name='A3C/A3CAgent'):
+  def __init__(self, training, ssize, force_focus_fire, name='A3C/A3CAgent'):
     self.name = name
     self.training = training
     self.summary = []
+    self.force_focus_fire = force_focus_fire
     # Screen size and info size
     self.ssize = ssize
     self.isize = len(U.useful_actions)
+    self.epsilon = [0.05, 0.2]
 
 
   def setup(self, sess, summary_writer):
@@ -42,8 +44,9 @@ class A3CAgent(object):
 
 
   def reset(self):
-    # Epsilon schedule
-    self.epsilon = [0.05, 0.2]
+    if False:
+      # Epsilon schedule
+      self.epsilon = [0.05, 0.2]
 
   def build_model(self, reuse, dev, ntype):
     with tf.variable_scope(self.name) and tf.device(dev):
@@ -106,9 +109,12 @@ class A3CAgent(object):
 
       self.saver = tf.train.Saver(max_to_keep=100)
 
+  def _xy_locs(mask):
+    """Mask should be a set of bools from comparison with a feature layer."""
+    y, x = mask.nonzero()
+    return list(zip(x, y))
 
   def step(self, obs):
-
     screen = np.array(obs.observation['feature_screen'], dtype=np.float32)
     screen = np.expand_dims(U.preprocess_screen(screen), axis=0)
     info = np.zeros([1, self.isize], dtype=np.float32)
@@ -149,7 +155,35 @@ class A3CAgent(object):
       dx = np.random.randint(-6, 7)
       target[1] = int(max(0, min(self.ssize-1, target[1]+dx)))
 
-    # Set act_id and act_args
+
+    if self.force_focus_fire:
+      # get the average marine location
+      player_relative = obs.observation.feature_screen.player_relative
+      marines = _xy_locs(player_relative == _PLAYER_SELF)
+      marine_xy = np.mean(marines, axis=0).round()
+
+      # Find the nearest low roach and save it so we know to attack with it
+      roaches = [unit for unit in obs.observation.feature_units if unit.alliance == features.PlayerRelative.ENEMY]
+      best_roach = 0
+      minHealth = 1000000
+      minDist = 0
+      for roach in roaches:
+        hp = roach.health
+        dist = np.sqrt((marine_xy[0]-roach.x)**2 + (marine_xy[1]-roach.y)**2)
+        if hp < minHealth or (hp == minHealth and dist < minDist):
+          minHealth = hp
+          minDist = dist
+          best_roach = roach
+      roach_xy = [best_roach.y, best_roach.x] # this gets swapped later
+
+      # if we're attacking, force it to be on the roach
+      # note that we could also limit it to attacking any roaches,
+      # but not discriminate which. This is better for now though
+      if act_id == 12:
+        target = roach_xy
+
+
+    #print(actions.FUNCTIONS[act_id].name, target)
     act_args = []
     for arg in actions.FUNCTIONS[act_id].args:
       # set the location of the action

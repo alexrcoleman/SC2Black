@@ -41,6 +41,11 @@ def run_loop(agents, env, max_frames=0):
             last_actions = acts
         # phase = 1 - phase
         timesteps = env.step(acts)
+
+        # Real time (technically should be 1/16 * steps_mul)
+        if False:
+          time.sleep(.25)
+
         is_done = (num_frames >= max_frames) or timesteps[0].last()
         if last_actions != 0:
             yield [last_timesteps[0], last_actions[0], timesteps[0]], is_done
