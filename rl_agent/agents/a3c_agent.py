@@ -61,7 +61,7 @@ class A3CAgent(object):
       self.extra_input = tf.placeholder(tf.float32, [None, 3], name='info')
 
       # Build networks
-      net = build_net(self.screen, self.info, self.extra_input, self.ssize, len(U.useful_actions), ntype)
+      net = build_net(self.screen, self.info, self.extra_input, self.ssize, len(U.useful_actions) , ntype)
       self.spatial_action, self.non_spatial_action, self.value = net
 
       # Set targets and masks
@@ -132,9 +132,48 @@ class A3CAgent(object):
     spatial_action = spatial_action.ravel()
     valid_actions = obs.observation['available_actions']
     valid_actions = U.compressActions(valid_actions)
-
+    # print(valid_actions)
+    og_id = np.argmax(non_spatial_action)
     net_act_id = valid_actions[np.argmax(non_spatial_action[valid_actions])]
+    # print(valid_actions)
+    # print(non_spatial_action)
+    # print(net_act_id)
     act_id = U.useful_actions[net_act_id]
+    if act_id == 1000:
+        act_id = 5
+        marines = [unit for unit in obs.observation.feature_units if unit.alliance != features.PlayerRelative.ENEMY]
+        best_marine = 0
+        minHealth = 1000000
+        minDist = 0
+        for marine in marines:
+          hp = marine.health
+          if hp < minHealth:
+            minHealth = hp
+            best_marine = marine
+        spatial_action = best_marine.y * self.ssize + best_marine.x
+
+    elif act_id == 1001:
+        act_id = 12
+        # print("GERE")
+        # get the average marine location
+        player_relative = obs.observation.feature_screen.player_relative
+        marines = _xy_locs(player_relative == _PLAYER_SELF)
+        marine_xy = np.mean(marines, axis=0).round()
+
+        # Find the nearest low roach and save it so we know to attack with it
+        roaches = [unit for unit in obs.observation.feature_units if unit.alliance == features.PlayerRelative.ENEMY]
+        best_roach = 0
+        minHealth = 1000000
+        minDist = 0
+        for roach in roaches:
+          hp = roach.health
+          dist = np.sqrt((marine_xy[0]-roach.x)**2 + (marine_xy[1]-roach.y)**2)
+          if hp < minHealth or (hp == minHealth and dist < minDist):
+            minHealth = hp
+            minDist = dist
+            best_roach = roach
+        #roach_xy = [best_roach.y, best_roach.x]
+        spatial_action = best_roach.y * self.ssize + best_roach.x
 
     target = np.argmax(spatial_action)
     target = [int(target // self.ssize), int(target % self.ssize)]
@@ -146,6 +185,42 @@ class A3CAgent(object):
     if self.training and np.random.rand() < self.epsilon[0]:
       net_act_id = np.random.choice(valid_actions)
       act_id = U.useful_actions[net_act_id]
+      if act_id == 1000:
+          act_id = 5
+          marines = [unit for unit in obs.observation.feature_units if unit.alliance != features.PlayerRelative.ENEMY]
+          best_marine = 0
+          minHealth = 1000000
+          minDist = 0
+          for marine in marines:
+            hp = marine.health
+            if hp < minHealth:
+              minHealth = hp
+              best_marine = marine
+          target = [best_marine.y, best_marine.x]
+        #  spatial_action = best_marine.y * self.ssize + best_marine.x
+
+      elif act_id == 1001:
+          act_id = 12
+          # print("GERE")
+          # get the average marine location
+          player_relative = obs.observation.feature_screen.player_relative
+          marines = _xy_locs(player_relative == _PLAYER_SELF)
+          marine_xy = np.mean(marines, axis=0).round()
+
+          # Find the nearest low roach and save it so we know to attack with it
+          roaches = [unit for unit in obs.observation.feature_units if unit.alliance == features.PlayerRelative.ENEMY]
+          best_roach = 0
+          minHealth = 1000000
+          minDist = 0
+          for roach in roaches:
+            hp = roach.health
+            dist = np.sqrt((marine_xy[0]-roach.x)**2 + (marine_xy[1]-roach.y)**2)
+            if hp < minHealth or (hp == minHealth and dist < minDist):
+              minHealth = hp
+              minDist = dist
+              best_roach = roach
+          target = [best_roach.y, best_roach.x]
+          #spatial_action = best_roach.y * self.ssize + best_roach.x
     if self.training and np.random.rand() < self.epsilon[0]:
         target[0] = np.random.randint(0, self.ssize)
         target[1] = np.random.randint(0, self.ssize)
@@ -154,34 +229,6 @@ class A3CAgent(object):
       target[0] = int(max(0, min(self.ssize-1, target[0]+dy)))
       dx = np.random.randint(-6, 7)
       target[1] = int(max(0, min(self.ssize-1, target[1]+dx)))
-
-
-    if self.force_focus_fire:
-      # get the average marine location
-      player_relative = obs.observation.feature_screen.player_relative
-      marines = _xy_locs(player_relative == _PLAYER_SELF)
-      marine_xy = np.mean(marines, axis=0).round()
-
-      # Find the nearest low roach and save it so we know to attack with it
-      roaches = [unit for unit in obs.observation.feature_units if unit.alliance == features.PlayerRelative.ENEMY]
-      best_roach = 0
-      minHealth = 1000000
-      minDist = 0
-      for roach in roaches:
-        hp = roach.health
-        dist = np.sqrt((marine_xy[0]-roach.x)**2 + (marine_xy[1]-roach.y)**2)
-        if hp < minHealth or (hp == minHealth and dist < minDist):
-          minHealth = hp
-          minDist = dist
-          best_roach = roach
-      roach_xy = [best_roach.y, best_roach.x] # this gets swapped later
-
-      # if we're attacking, force it to be on the roach
-      # note that we could also limit it to attacking any roaches,
-      # but not discriminate which. This is better for now though
-      if act_id == 12:
-        target = roach_xy
-
 
     #print(actions.FUNCTIONS[act_id].name, target)
     act_args = []

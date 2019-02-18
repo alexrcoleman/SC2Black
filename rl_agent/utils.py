@@ -25,13 +25,15 @@ useful_actions = [
 #2, # select_point
 #3, # select_rect
 #4, # select_control_group
-#5, # select_unit
-#7, # select_army
+5, # select_unit
+7, # select_army
 12, # Attack_screen
 #274, # HoldPosition_quick
 331, # Move_screen
 #333, # Patrol_screen
 #453, # Stop_quick
+1000, #select marine
+1001, #attack roach
 ]
 compress_actions = {}
 ii = 0
@@ -44,6 +46,10 @@ def compressActions(ids):
   for id in ids:
     if id in compress_actions:
       res.append(compress_actions[id])
+  if 5 in ids:
+      res.append(compress_actions[1000])
+  if 12 in ids:
+      res.append(compress_actions[1001]) 
   return res
 
 def _isScalar(i):

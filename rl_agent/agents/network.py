@@ -11,7 +11,7 @@ def build_net(screen, info, extra_input, ssize, num_action, ntype):
 
 def build_fcn(screen, info, extra_input, ssize, num_action):
   # Extract features
-  scale_factor = .4
+  scale_factor = .2
 
   sconv1 = layers.conv2d(tf.transpose(screen, [0, 2, 3, 1]),
                          num_outputs=16,
