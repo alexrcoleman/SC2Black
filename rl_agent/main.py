@@ -32,7 +32,7 @@ flags.DEFINE_string("snapshot_path", "./snapshot/", "Path for snapshot.")
 flags.DEFINE_string("log_path", "./log/", "Path for log.")
 flags.DEFINE_string("device", "0", "Device for training.")
 
-flags.DEFINE_string("map", "CollectMineralShards", "Name of a map to use.")
+flags.DEFINE_string("map", "DefeatRoaches", "Name of a map to use.")
 flags.DEFINE_bool("render", False, "Whether to render with pygame.")
 flags.DEFINE_integer("screen_resolution", 64, "Resolution for screen feature layers.")
 flags.DEFINE_integer("minimap_resolution", 64, "Resolution for minimap feature layers.")
@@ -40,7 +40,7 @@ flags.DEFINE_integer("step_mul", 4, "Game steps per agent step.")
 
 flags.DEFINE_string("agent", "agents.a3c_agent.A3CAgent", "Which agent to run.")
 flags.DEFINE_string("net", "fcn", "atari or fcn.")
-flags.DEFINE_integer("max_agent_steps", 60*3, "Total agent steps.")
+flags.DEFINE_integer("max_agent_steps", 500, "Total agent steps.")
 
 flags.DEFINE_bool("profile", False, "Whether to turn on code profiling.")
 flags.DEFINE_bool("trace", False, "Whether to trace the code execution.")
@@ -166,9 +166,8 @@ def _main(unused_argv):
   config.gpu_options.allow_growth = True
   sess = tf.Session(config=config)
 
-  summary_writer = tf.summary.FileWriter(LOG)
   for i in range(PARALLEL):
-    agents[i].setup(sess, summary_writer)
+    agents[i].setup(sess)
 
   agent.initialize()
   if not FLAGS.training or FLAGS.continuation:

@@ -11,31 +11,19 @@ from pysc2.lib import features
 from agents.network import build_net
 import utils as U
 
-# For computing new rewards:
-_PLAYER_SELF = features.PlayerRelative.SELF
-def _xy_locs(mask):
-  """Mask should be a set of bools from comparison with a feature layer."""
-  y, x = mask.nonzero()
-  return list(zip(x, y))
 
 class A3CAgent(object):
 
-
   """An agent specifically for solving the mini-game maps."""
-  def __init__(self, training, ssize, force_focus_fire, name='A3C/A3CAgent'):
+  def __init__(self, training, ssize, name='A3C/A3CAgent'):
     self.name = name
     self.training = training
-    self.summary = []
-    self.force_focus_fire = force_focus_fire
-    # Screen size and info size
     self.ssize = ssize
     self.isize = len(U.useful_actions)
-    self.epsilon = [0.05, 0.2]
 
 
-  def setup(self, sess, summary_writer):
+  def setup(self, sess):
     self.sess = sess
-    self.summary_writer = summary_writer
 
 
   def initialize(self):
@@ -43,10 +31,17 @@ class A3CAgent(object):
     self.sess.run(init_op)
 
 
-  def reset(self):
-    if False:
-      # Epsilon schedule
-      self.epsilon = [0.05, 0.2]
+  def getPolicyLoss(self, action_probability, advantage):
+      return -tf.reduce_sum(tf.log(action_probability) * advantage)
+
+
+  def getValueLoss(self, value_target, value_prediction):
+      return tf.reduce_sum(tf.square(value_target - value_prediction))
+
+
+  def getEntropy(self, policy, spatial_policy, valid_spatial):
+      return -(tf.reduce_sum(policy * tf.log(policy)) + tf.reduce_sum(spatial_policy * tf.log(spatial_policy)))
+
 
   def build_model(self, reuse, dev, ntype):
     with tf.variable_scope(self.name) and tf.device(dev):
@@ -57,11 +52,9 @@ class A3CAgent(object):
       # Set inputs of networks
       self.screen = tf.placeholder(tf.float32, [None, U.screen_channel(), self.ssize, self.ssize], name='screen')
       self.info = tf.placeholder(tf.float32, [None, self.isize], name='info')
-      # todo: actually put some inputs in this vec
-      self.extra_input = tf.placeholder(tf.float32, [None, 3], name='info')
 
       # Build networks
-      net = build_net(self.screen, self.info, self.extra_input, self.ssize, len(U.useful_actions), ntype)
+      net = build_net(self.screen, self.info,  self.ssize, len(U.useful_actions), ntype)
       self.spatial_action, self.non_spatial_action, self.value = net
 
       # Set targets and masks
@@ -70,29 +63,23 @@ class A3CAgent(object):
       self.valid_non_spatial_action = tf.placeholder(tf.float32, [None, len(U.useful_actions)], name='valid_non_spatial_action')
       self.non_spatial_action_selected = tf.placeholder(tf.float32, [None, len(U.useful_actions)], name='non_spatial_action_selected')
       self.value_target = tf.placeholder(tf.float32, [None], name='value_target')
+      # This will get the probability of choosing a valid action. Given that we force it to choose from
+      # the set of valid actions. The probability of an action is the probability the policy chooses
+      # divided by the probability of a valid action
+      valid_non_spatial_action_probability = tf.reduce_sum(self.valid_non_spatial_action * self.non_spatial_action)
+      non_spatial_action_probability = tf.reduce_sum(self.non_spatial_action_selected * self.non_spatial_action) / valid_non_spatial_action_probability
 
-      # Compute log probability
-      spatial_action_prob = tf.reduce_sum(self.spatial_action * self.spatial_action_selected, axis=1)
-      spatial_action_log_prob = tf.log(tf.clip_by_value(spatial_action_prob, 1e-10, 1.))
-      non_spatial_action_prob = tf.reduce_sum(self.non_spatial_action * self.non_spatial_action_selected, axis=1)
-      valid_non_spatial_action_prob = tf.reduce_sum(self.non_spatial_action * self.valid_non_spatial_action, axis=1)
-      valid_non_spatial_action_prob = tf.clip_by_value(valid_non_spatial_action_prob, 1e-10, 1.)
-      non_spatial_action_prob = non_spatial_action_prob / valid_non_spatial_action_prob
-      non_spatial_action_log_prob = tf.log(tf.clip_by_value(non_spatial_action_prob, 1e-10, 1.))
-      self.summary.append(tf.summary.histogram('spatial_action_prob', spatial_action_prob))
-      self.summary.append(tf.summary.histogram('non_spatial_action_prob', non_spatial_action_prob))
+      # Here we compute the probability of the spatial action. If the action selected was non spactial,
+      # the probability will be one.
+      spatial_action_prob = (self.valid_spatial_action * tf.reduce_sum(self.spatial_action * self.spatial_action_selected) )+(1.0 - self.valid_spatial_action)
 
-      # Compute losses, more details in https://arxiv.org/abs/1602.01783
-      # Policy loss and value loss
-      action_log_prob = self.valid_spatial_action * spatial_action_log_prob + non_spatial_action_log_prob
-      advantage = tf.stop_gradient(self.value_target - self.value)
-      policy_loss = - tf.reduce_mean(action_log_prob * advantage)
-      value_loss = - tf.reduce_mean(self.value * advantage)
-      self.summary.append(tf.summary.scalar('policy_loss', policy_loss))
-      self.summary.append(tf.summary.scalar('value_loss', value_loss))
+      # The probability of the action will be the the product of the non spatial and the spatial prob
+      action_probability = non_spatial_action_probability * spatial_action_prob
 
-      # TODO: policy penalty
-      loss = policy_loss + value_loss
+      # The advantage function, which will represent how much better this action was than what was expected from this state
+      advantage = self.value_target - self.value
+
+      loss = self.getPolicyLoss(action_probability, advantage) + self.getValueLoss(self.value_target, self.value) *.5 + self.getEntropy(self.spatial_action, self.valid_spatial_action, self.spatial_action) *.01
 
       # Build the optimizer
       self.learning_rate = tf.placeholder(tf.float32, None, name='learning_rate')
@@ -100,19 +87,11 @@ class A3CAgent(object):
       grads = opt.compute_gradients(loss)
       cliped_grad = []
       for grad, var in grads:
-        self.summary.append(tf.summary.histogram(var.op.name, var))
-        self.summary.append(tf.summary.histogram(var.op.name+'/grad', grad))
         grad = tf.clip_by_norm(grad, 10.0)
         cliped_grad.append([grad, var])
       self.train_op = opt.apply_gradients(cliped_grad)
-      self.summary_op = tf.summary.merge(self.summary)
 
       self.saver = tf.train.Saver(max_to_keep=100)
-
-  def _xy_locs(mask):
-    """Mask should be a set of bools from comparison with a feature layer."""
-    y, x = mask.nonzero()
-    return list(zip(x, y))
 
   def step(self, obs):
     screen = np.array(obs.observation['feature_screen'], dtype=np.float32)
@@ -133,66 +112,20 @@ class A3CAgent(object):
     valid_actions = obs.observation['available_actions']
     valid_actions = U.compressActions(valid_actions)
 
-    net_act_id = valid_actions[np.argmax(non_spatial_action[valid_actions])]
+    net_act_id = valid_actions[np.random.choice(np.arange(len(non_spatial_action[valid_actions])), p=non_spatial_action[valid_actions]/np.sum(non_spatial_action[valid_actions]))]
     act_id = U.useful_actions[net_act_id]
 
-    target = np.argmax(spatial_action)
+
+    target = np.random.choice(np.arange(len(spatial_action)), p=spatial_action)
+
     target = [int(target // self.ssize), int(target % self.ssize)]
 
-    # show the action being chosen:
-    #  print(actions.FUNCTIONS[act_id].name, target)
-
-    # Epsilon greedy exploration
-    if self.training and np.random.rand() < self.epsilon[0]:
-      net_act_id = np.random.choice(valid_actions)
-      act_id = U.useful_actions[net_act_id]
-    if self.training and np.random.rand() < self.epsilon[0]:
-        target[0] = np.random.randint(0, self.ssize)
-        target[1] = np.random.randint(0, self.ssize)
-    if self.training and np.random.rand() < self.epsilon[1]:
-      dy = np.random.randint(-6, 7)
-      target[0] = int(max(0, min(self.ssize-1, target[0]+dy)))
-      dx = np.random.randint(-6, 7)
-      target[1] = int(max(0, min(self.ssize-1, target[1]+dx)))
-
-
-    if self.force_focus_fire:
-      # get the average marine location
-      player_relative = obs.observation.feature_screen.player_relative
-      marines = _xy_locs(player_relative == _PLAYER_SELF)
-      marine_xy = np.mean(marines, axis=0).round()
-
-      # Find the nearest low roach and save it so we know to attack with it
-      roaches = [unit for unit in obs.observation.feature_units if unit.alliance == features.PlayerRelative.ENEMY]
-      best_roach = 0
-      minHealth = 1000000
-      minDist = 0
-      for roach in roaches:
-        hp = roach.health
-        dist = np.sqrt((marine_xy[0]-roach.x)**2 + (marine_xy[1]-roach.y)**2)
-        if hp < minHealth or (hp == minHealth and dist < minDist):
-          minHealth = hp
-          minDist = dist
-          best_roach = roach
-      roach_xy = [best_roach.y, best_roach.x] # this gets swapped later
-
-      # if we're attacking, force it to be on the roach
-      # note that we could also limit it to attacking any roaches,
-      # but not discriminate which. This is better for now though
-      if act_id == 12:
-        target = roach_xy
-
-
-    #print(actions.FUNCTIONS[act_id].name, target)
     act_args = []
     for arg in actions.FUNCTIONS[act_id].args:
       # set the location of the action
       if arg.name in ('screen', 'minimap', 'screen2'):
         act_args.append([target[1], target[0]])
       else:
-        # TODO: Handle this better with more output
-        # ex. control groups requires specifying both the control group
-        # id and whether you are selecting or setting the group
         act_args.append([0])
     return actions.FunctionCall(act_id, act_args)
 
@@ -224,7 +157,6 @@ class A3CAgent(object):
     spatial_action_selected = np.zeros([len(rbs), self.ssize**2], dtype=np.float32)
     valid_non_spatial_action = np.zeros([len(rbs), len(U.useful_actions)], dtype=np.float32)
     non_spatial_action_selected = np.zeros([len(rbs), len(U.useful_actions)], dtype=np.float32)
-
     rbs.reverse()
     for i, [obs, action, next_obs] in enumerate(rbs):
       screen = np.array(obs.observation['feature_screen'], dtype=np.float32)
@@ -242,18 +174,6 @@ class A3CAgent(object):
 
 
       player_relative = obs.observation.feature_screen.player_relative
-      marines = _xy_locs(player_relative == _PLAYER_SELF)
-      # ex. reward based on distance
-      if len(marines) >= 2 and False:
-        bonus = 0
-        for i in range(0,len(marines)):
-          for j in range(i+1,len(marines)):
-            bonus = bonus + np.linalg.norm(np.array(marines[i])-np.array(marines[j]))
-        bonus = bonus * .001
-        if reward > 0:
-          # scale by (1+bonus) so each shard collected rewards them 1 point +
-          # distance apart
-          reward = reward * (1 + bonus)
 
       value_target[i] = reward + disc * value_target[i-1]
 
@@ -281,9 +201,9 @@ class A3CAgent(object):
             self.spatial_action_selected: spatial_action_selected,
             self.valid_non_spatial_action: valid_non_spatial_action,
             self.non_spatial_action_selected: non_spatial_action_selected,
-            self.learning_rate: lr}
-    _, summary = self.sess.run([self.train_op, self.summary_op], feed_dict=feed)
-    self.summary_writer.add_summary(summary, cter)
+            self.learning_rate: lr,
+            }
+    self.sess.run([self.train_op], feed_dict=feed)
 
 
   def save_model(self, path, count):

@@ -90,10 +90,10 @@ def run_thread(agent, map_name, visualize, stats):
           agent.update(replay_buffer, FLAGS.discount, learning_rate, counter)
           obs = recorder[-1].observation
           score = obs["score_cumulative"][0]
-          print('Your score is '+str(score)+'! counter is ' + str(counter))
+         # print('Your score is '+str(score)+'! counter is ' + str(counter))
           if counter == 1:
             global average
-            average = 0			
+            average = 0
           if counter % 100 == 0:
             print('Average is ' + str(average))
             stats.write('Average score for tests ' + str(counter - 100) + '-' + str(counter)

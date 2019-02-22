@@ -18,11 +18,6 @@ def run_loop(agents, env, max_frames=0):
     while True:
       num_frames = 0
       timesteps = env.reset()
-      for a in agents:
-        a.reset()
-
-
-
       phase = 1
       last_actions = 0
       while True:

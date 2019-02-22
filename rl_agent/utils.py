@@ -22,8 +22,8 @@ useful_screens = [
 ]
 useful_actions = [
 0, # no_op
-#2, # select_point
-#3, # select_rect
+2, # select_point
+3, # select_rect
 #4, # select_control_group
 #5, # select_unit
 #7, # select_army
@@ -50,6 +50,8 @@ def _isScalar(i):
   feat = features.SCREEN_FEATURES[i]
   return i == _SCREEN_PLAYER_ID or i == _SCREEN_UNIT_TYPE or i == _SCREEN_SELECTED or feat.type == features.FeatureType.SCALAR
 
+use_coords = True
+
 def preprocess_screen(screen):
   layers = []
   for i in useful_screens:
@@ -62,12 +64,23 @@ def preprocess_screen(screen):
         indy, indx = (screen[i] == j).nonzero()
         layer[j, indy, indx] = 1
       layers.append(layer)
+  if use_coords:
+      x = np.zeros([screen.shape[1], screen.shape[2]], dtype=np.float32)
+      y = np.zeros([screen.shape[1], screen.shape[2]], dtype=np.float32)
+      for i in range(screen.shape[1]):
+          for j in range(screen.shape[2]):
+              x[i][j] = i/screen.shape[1];
+              y[i][j] = j/screen.shape[2];
+      layers.append([x,y])
+
   return np.concatenate(layers, axis=0)
 
 
 
 def screen_channel():
   c = 0
+  if use_coords:
+      c += 2
   for i in useful_screens:
     feat = features.SCREEN_FEATURES[i]
     if _isScalar(i):
