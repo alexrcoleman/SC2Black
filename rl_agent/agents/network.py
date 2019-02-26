@@ -6,12 +6,9 @@ import tensorflow as tf
 import tensorflow.contrib.layers as layers
 
 
-def build_net(screen, info, ssize, num_action, ntype):
-    return build_fcn( screen, info, ssize, num_action)
-
-def build_fcn(screen, info, ssize, num_action):
+def build_net(screen, info, ssize, num_action):
   # Extract features
-  scale_factor = 1
+  scale_factor = .05
 
   sconv1 = layers.conv2d(tf.transpose(screen, [0, 2, 3, 1]),
                          num_outputs=16,

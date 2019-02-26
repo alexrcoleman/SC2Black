@@ -15,15 +15,17 @@ import utils as U
 class A3CAgent(object):
 
   """An agent specifically for solving the mini-game maps."""
-  def __init__(self, training, ssize, name='A3C/A3CAgent'):
+  def __init__(self, training, ssize,writer, graph_loss,  name='A3C/A3CAgent'):
     self.name = name
     self.training = training
     self.ssize = ssize
     self.isize = len(U.useful_actions)
+    self.summary = []
+    self.graph_loss = graph_loss
 
-
-  def setup(self, sess):
+  def setup(self, sess, writer):
     self.sess = sess
+    self.summary_writer = writer
 
 
   def initialize(self):
@@ -40,10 +42,12 @@ class A3CAgent(object):
 
 
   def getEntropy(self, policy, spatial_policy, valid_spatial):
-      return -(tf.reduce_sum(policy * tf.log(policy)) + tf.reduce_sum(spatial_policy * tf.log(spatial_policy)))
+      policy = tf.clip_by_value(policy, 1e-10, 1.)
+      spatial_policy = tf.clip_by_value(spatial_policy, 1e-10, 1.)
+      return -(tf.reduce_sum(policy * tf.log(policy)) + valid_spatial * tf.reduce_sum(spatial_policy * tf.log(spatial_policy)))
 
 
-  def build_model(self, reuse, dev, ntype):
+  def build_model(self, reuse, dev):
     with tf.variable_scope(self.name) and tf.device(dev):
       if reuse:
         tf.get_variable_scope().reuse_variables()
@@ -54,7 +58,7 @@ class A3CAgent(object):
       self.info = tf.placeholder(tf.float32, [None, self.isize], name='info')
 
       # Build networks
-      net = build_net(self.screen, self.info,  self.ssize, len(U.useful_actions), ntype)
+      net = build_net(self.screen, self.info,  self.ssize, len(U.useful_actions))
       self.spatial_action, self.non_spatial_action, self.value = net
 
       # Set targets and masks
@@ -79,17 +83,27 @@ class A3CAgent(object):
       # The advantage function, which will represent how much better this action was than what was expected from this state
       advantage = self.value_target - self.value
 
-      loss = self.getPolicyLoss(action_probability, advantage) + self.getValueLoss(self.value_target, self.value) *.5 + self.getEntropy(self.spatial_action, self.valid_spatial_action, self.spatial_action) *.01
+      policy_loss = self.getPolicyLoss(action_probability, advantage)
+      value_loss = self.getValueLoss(self.value_target, self.value)
+      entropy = self.getEntropy(self.spatial_action, self.valid_spatial_action, self.spatial_action)
 
+
+      loss =  policy_loss + value_loss *.5 + entropy * .01
+
+      if self.graph_loss:
+          self.summary.append(tf.summary.scalar('policy',tf.reduce_mean(policy_loss)))
+          self.summary.append(tf.summary.scalar('value',tf.reduce_mean(value_loss)))
+          self.summary.append(tf.summary.scalar('entropy',tf.reduce_mean(entropy)))
+          self.summary.append(tf.summary.scalar('loss',tf.reduce_mean(loss)))
+          self.summary_op = tf.summary.merge(self.summary)
+          self.summary = []
+      else:
+          self.summary_op = []
       # Build the optimizer
       self.learning_rate = tf.placeholder(tf.float32, None, name='learning_rate')
       opt = tf.train.RMSPropOptimizer(self.learning_rate, decay=0.99, epsilon=1e-10)
       grads = opt.compute_gradients(loss)
-      cliped_grad = []
-      for grad, var in grads:
-        grad = tf.clip_by_norm(grad, 10.0)
-        cliped_grad.append([grad, var])
-      self.train_op = opt.apply_gradients(cliped_grad)
+      self.train_op = opt.apply_gradients(grads)
 
       self.saver = tf.train.Saver(max_to_keep=100)
 
@@ -203,8 +217,10 @@ class A3CAgent(object):
             self.non_spatial_action_selected: non_spatial_action_selected,
             self.learning_rate: lr,
             }
-    self.sess.run([self.train_op], feed_dict=feed)
-
+    _, summary = self.sess.run([self.train_op, self.summary_op], feed_dict=feed)
+    if self.graph_loss:
+        self.summary_writer.add_summary(summary, cter)
+        self.summary_writer.flush()
 
   def save_model(self, path, count):
     self.saver.save(self.sess, path+'/model.pkl', count)

@@ -24,7 +24,7 @@ LOCK = threading.Lock()
 FLAGS = flags.FLAGS
 flags.DEFINE_bool("training", True, "Whether to train agents.")
 flags.DEFINE_bool("continuation", False, "Continuously training.")
-flags.DEFINE_float("learning_rate", 5e-4, "Learning rate for training.")
+flags.DEFINE_float("learning_rate", 5e-5, "Learning rate for training.")
 flags.DEFINE_float("discount", 0.99, "Discount rate for future rewards.")
 flags.DEFINE_integer("max_steps", int(1e5), "Total steps for training.")
 flags.DEFINE_integer("snapshot_step", int(1e3), "Step for snapshot.")
@@ -47,8 +47,15 @@ flags.DEFINE_bool("trace", False, "Whether to trace the code execution.")
 flags.DEFINE_integer("parallel", 1, "How many instances to run in parallel.")
 flags.DEFINE_bool("save_replay", False, "Whether to save a replay at the end.")
 flags.DEFINE_bool("force_focus_fire", True, "Whether to force focus firing (i.e. all 'attack' actions will redirect to lowest health / closest roach)")
-
+flags.DEFINE_bool("use_tensorboard", False, "weather or not to use usetensorboard")
+flags.DEFINE_string("tensorboard_dir", None, "directory for tb")
 FLAGS(sys.argv)
+
+TBDIR = ''
+if FLAGS.use_tensorboard:
+    TBDIR = './tboard/' + FLAGS.tensorboard_dir +'//'
+
+
 if FLAGS.training:
   PARALLEL = FLAGS.parallel
   MAX_AGENT_STEPS = FLAGS.max_agent_steps
@@ -60,6 +67,7 @@ else:
 
 LOG = FLAGS.log_path+FLAGS.map+'/'+FLAGS.net
 SNAPSHOT = FLAGS.snapshot_path+FLAGS.map+'/'+FLAGS.net
+
 if not os.path.exists(LOG):
   os.makedirs(LOG)
 if not os.path.exists(SNAPSHOT):
@@ -107,11 +115,6 @@ def run_thread(agent, map_name, visualize, stats):
           if counter >= FLAGS.max_steps:
             break
 
-          # Randomly change the epsilon on different runs maybe?
-          #if np.random.randint(0,10) == 0:
-          #  agent.epsilon = [0,0]
-          #else:
-          #  agent.epsilon = [np.random.uniform(0,.1), np.random.uniform(0,.4)]
       elif is_done:
         obs = recorder[-1].observation
         score = obs["score_cumulative"][0]
@@ -154,12 +157,10 @@ def _main(unused_argv):
   stats = open("scoreStatistic.txt", mode='w')
 
   agents = []
+  summary_writer = tf.summary.FileWriter(TBDIR)
   for i in range(PARALLEL):
-    agent = agent_cls(FLAGS.training, FLAGS.screen_resolution, FLAGS.force_focus_fire)
-    # 1/3 of all agents will play optimally, to see late game scenarios more
-    if i % 3 == 1:
-      agent.epsilon = [0,0]
-    agent.build_model(i > 0, DEVICE[i % len(DEVICE)], FLAGS.net)
+    agent = agent_cls(FLAGS.training, FLAGS.screen_resolution, summary_writer, FLAGS.use_tensorboard )
+    agent.build_model(i > 0, DEVICE[i % len(DEVICE)])
     agents.append(agent)
 
   config = tf.ConfigProto(allow_soft_placement=True)
@@ -167,7 +168,7 @@ def _main(unused_argv):
   sess = tf.Session(config=config)
 
   for i in range(PARALLEL):
-    agents[i].setup(sess)
+    agents[i].setup(sess, summary_writer)
 
   agent.initialize()
   if not FLAGS.training or FLAGS.continuation:
@@ -189,7 +190,7 @@ def _main(unused_argv):
 
   for t in threads:
     t.join()
-
+  summary_writer.close()
 
   steps = min(FLAGS.max_agent_steps * FLAGS.step_mul, 1920)
   print("Showing score graphs")
