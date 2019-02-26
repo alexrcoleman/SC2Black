@@ -127,6 +127,8 @@ def run_thread(agent, map_name, visualize, stats):
         print('Your score is '+str(score)+'!')
       if is_done:
          addScore(obs["score_cumulative"][0])
+      if agent.killed:
+        break
 
     if FLAGS.save_replay:
       env.save_replay(agent.name)
@@ -148,6 +150,16 @@ def runningAverage(list, size):
             nlist.append(sum/size)
     return nlist
 
+def process_cmd(agents):
+  while True:
+    line = input()
+    if line == 'q' or line == 'exit' or line == 'quit':
+      print("Killing agents...")
+      for a in agents:
+        a.killed = True
+      break
+    else:
+      print("Unknown command '" + line + "'")
 def _main(unused_argv):
   """Run agents"""
   stopwatch.sw.enabled = FLAGS.profile or FLAGS.trace
@@ -186,15 +198,15 @@ def _main(unused_argv):
 
   # Run threads
   threads = []
-  for i in range(PARALLEL - 1):
-    t = threading.Thread(target=run_thread, args=(agents[i], FLAGS.map, False, stats))
+  for i in range(PARALLEL):
+    t = threading.Thread(target=run_thread, args=(agents[i], FLAGS.map, i == 0 and FLAGS.render, stats))
     threads.append(t)
     t.daemon = True
     t.start()
     time.sleep(5)
-
-  run_thread(agents[-1], FLAGS.map, FLAGS.render, stats)
-  #print("HERE WE GFOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO")
+  cmdThread = threading.Thread(target=process_cmd, args=(agents,))
+  cmdThread.daemon = True
+  cmdThread.start()
   for t in threads:
     t.join()
   summary_writer.close()

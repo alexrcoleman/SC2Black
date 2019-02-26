@@ -23,6 +23,7 @@ class A3CAgent(object):
     self.summary = []
     self.graph_loss = graph_loss
     self.force_focus_fire = force_focus_fire
+    self.killed = False
 
   def setup(self, sess, writer):
     self.sess = sess
@@ -153,7 +154,7 @@ class A3CAgent(object):
     #     print('non spatial action continas nan')
     # if np.sum(non_spatial_action[valid_actions]) == 0:
     #     print("DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD")
-    print(non_spatial_action)
+    #print(non_spatial_action)
     if self.training:
       node_non_spatial_id = np.random.choice(np.arange(len(non_spatial_action[valid_actions])), p=non_spatial_action[valid_actions]/np.sum(non_spatial_action[valid_actions]))
       node_spatial_id = np.random.choice(np.arange(len(spatial_action)), p=spatial_action)
