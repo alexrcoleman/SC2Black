@@ -15,13 +15,14 @@ import utils as U
 class A3CAgent(object):
 
   """An agent specifically for solving the mini-game maps."""
-  def __init__(self, training, ssize,writer, graph_loss,  name='A3C/A3CAgent'):
+  def __init__(self, training, ssize, force_focus_fire, writer, graph_loss, name='A3C/A3CAgent'):
     self.name = name
     self.training = training
     self.ssize = ssize
     self.isize = len(U.useful_actions)
     self.summary = []
     self.graph_loss = graph_loss
+    self.force_focus_fire = force_focus_fire
 
   def setup(self, sess, writer):
     self.sess = sess
@@ -38,6 +39,7 @@ class A3CAgent(object):
 
 
   def getValueLoss(self, value_target, value_prediction):
+      #return tf.reduce_sum(tf.square(value_target - tf.reshape(value_prediction,[-1])))
       return tf.reduce_sum(tf.square(value_target - value_prediction))
 
 
@@ -88,12 +90,13 @@ class A3CAgent(object):
       entropy = self.getEntropy(self.spatial_action, self.valid_spatial_action, self.spatial_action)
 
 
-      loss =  policy_loss + value_loss *.5 + entropy * .01
+      loss =  policy_loss + value_loss*.35 + entropy * .01 # tf.math.maximum(
 
       if self.graph_loss:
           self.summary.append(tf.summary.scalar('policy',tf.reduce_mean(policy_loss)))
           self.summary.append(tf.summary.scalar('value',tf.reduce_mean(value_loss)))
           self.summary.append(tf.summary.scalar('entropy',tf.reduce_mean(entropy)))
+          self.summary.append(tf.summary.scalar('advantage',tf.reduce_mean(entropy)))
           self.summary.append(tf.summary.scalar('loss',tf.reduce_mean(loss)))
           self.summary_op = tf.summary.merge(self.summary)
           self.summary = []
@@ -126,20 +129,52 @@ class A3CAgent(object):
     valid_actions = obs.observation['available_actions']
     valid_actions = U.compressActions(valid_actions)
 
-    net_act_id = valid_actions[np.random.choice(np.arange(len(non_spatial_action[valid_actions])), p=non_spatial_action[valid_actions]/np.sum(non_spatial_action[valid_actions]))]
+
+    # Take the node highest with the most weight
+    node_non_spatial_id = np.argmax(non_spatial_action[valid_actions])
+    node_spatial_id = np.argmax(spatial_action)
+    # If training, choose randomly based on weights
+    if self.training:
+      node_non_spatial_id = np.random.choice(np.arange(len(non_spatial_action[valid_actions])), p=non_spatial_action[valid_actions]/np.sum(non_spatial_action[valid_actions]))
+      node_spatial_id = np.random.choice(np.arange(len(spatial_action)), p=spatial_action)
+
+    # Map these into actual actions / location
+    net_act_id = valid_actions[node_non_spatial_id]
     act_id = U.useful_actions[net_act_id]
+    target = [int(node_spatial_id // self.ssize), int(node_spatial_id % self.ssize)]
 
+    if self.force_focus_fire:
+      # get the average marine location
+      player_relative = obs.observation.feature_screen.player_relative
+      marines = U.xy_locs(player_relative == features.PlayerRelative.SELF)
+      marine_xy = np.mean(marines, axis=0).round()
 
-    target = np.random.choice(np.arange(len(spatial_action)), p=spatial_action)
+       # Find the nearest low roach and save it so we know to attack with it
+      roaches = [unit for unit in obs.observation.feature_units if unit.alliance == features.PlayerRelative.ENEMY]
+      best_roach = 0
+      minHealth = 1000000
+      minDist = 0
+      for roach in roaches:
+        hp = roach.health
+        dist = np.sqrt((marine_xy[0]-roach.x)**2 + (marine_xy[1]-roach.y)**2)
+        if hp < minHealth or (hp == minHealth and dist < minDist):
+          minHealth = hp
+          minDist = dist
+          best_roach = roach
+      roach_xy = [best_roach.y, best_roach.x] # this gets swapped later
+      if act_id == 12:
+        target = roach_xy
 
-    target = [int(target // self.ssize), int(target % self.ssize)]
-
+    # Set the action arguments (currently only supports screen location)
     act_args = []
     for arg in actions.FUNCTIONS[act_id].args:
       # set the location of the action
       if arg.name in ('screen', 'minimap', 'screen2'):
         act_args.append([target[1], target[0]])
       else:
+        # TODO: Handle this better with more output
+        # ex. control groups requires specifying both the control group
+        # id and whether you are selecting or setting the group
         act_args.append([0])
     return actions.FunctionCall(act_id, act_args)
 
@@ -182,6 +217,7 @@ class A3CAgent(object):
       infos.append(info)
 
       reward = obs.reward
+      # TODO: Here is where we can add pseudo-reward (e.g. for hitting a roach)
       act_id = action.function
       net_act_id = U.compress_actions[act_id]
       act_args = action.arguments
