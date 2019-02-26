@@ -254,7 +254,7 @@ class A3CAgent(object):
 
       args = actions.FUNCTIONS[act_id].args
       for arg, act_arg in zip(args, act_args):
-        if arg.name in ('screen', 'minimap', 'screen2') and (!self.force_focus_fire or act_id != 12):
+        if arg.name in ('screen', 'minimap', 'screen2') and (not self.force_focus_fire or act_id != 12):
           ind = act_arg[1] * self.ssize + act_arg[0]
           valid_spatial_action[i] = 1
           spatial_action_selected[i, ind] = 1
