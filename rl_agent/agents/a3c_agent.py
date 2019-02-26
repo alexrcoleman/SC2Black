@@ -46,7 +46,7 @@ class A3CAgent(object):
   def getEntropy(self, policy, spatial_policy, valid_spatial):
       policy = tf.clip_by_value(policy, 1e-10, 1.)
       spatial_policy = tf.clip_by_value(spatial_policy, 1e-10, 1.)
-      return -(tf.reduce_sum(policy * tf.log(policy)) + valid_spatial * tf.reduce_sum(spatial_policy * tf.log(spatial_policy)))
+      return -tf.reduce_sum((tf.reduce_sum(policy * tf.log(policy)) + .1 * valid_spatial * tf.reduce_sum(spatial_policy * tf.log(spatial_policy))))
 
 
   def build_model(self, reuse, dev):
@@ -69,7 +69,7 @@ class A3CAgent(object):
       self.valid_non_spatial_action = tf.placeholder(tf.float32, [None, len(U.useful_actions)], name='valid_non_spatial_action')
       self.non_spatial_action_selected = tf.placeholder(tf.float32, [None, len(U.useful_actions)], name='non_spatial_action_selected')
       self.value_target = tf.placeholder(tf.float32, [None], name='value_target')
-
+      self.policy_only = tf.placeholder(tf.float32, shape=(), name='policy_only')
       # This will get the probability of choosing a valid action. Given that we force it to choose from
       # the set of valid actions. The probability of an action is the probability the policy chooses
       # divided by the probability of a valid action
@@ -86,13 +86,20 @@ class A3CAgent(object):
       # The advantage function, which will represent how much better this action was than what was expected from this state
       advantage = self.value_target - self.value
       # negative_advantage = tf.where(tf.greater(advantage, 0), advantage, 0)
-      negative_advantage = -tf.nn.relu(-advantage)
+      # negative_advantage = -tf.nn.relu(-advantage)
 
       policy_loss = self.getPolicyLoss(action_probability, advantage)
       value_loss = self.getValueLoss(self.value_target, self.value)
       entropy = self.getEntropy(self.spatial_action, self.valid_spatial_action, self.spatial_action)
+      # print("POLICTY LOSS", policy_loss.shape)
+      # print("Value LOSS", value_loss.shape)
+      # print("entropy", entropy.shape)
+      # print("spatial shape", spatial_action_prob.shape)
+      # print("adv", advantage.shape)
 
-      loss =  policy_loss + value_loss *.65# + entropy * .001
+      loss = self.policy_only * policy_loss + (1 - self.policy_only) * value_loss + entropy * .08
+
+      # loss = policy_loss +  .5 * value_loss + entropy * .05
 
       if self.graph_loss:
           self.summary.append(tf.summary.scalar('policy',tf.reduce_mean(policy_loss)))
@@ -108,8 +115,11 @@ class A3CAgent(object):
       self.learning_rate = tf.placeholder(tf.float32, None, name='learning_rate')
       opt = tf.train.AdamOptimizer()
       grads = opt.compute_gradients(loss)
-
-      self.train_op = opt.apply_gradients(grads)
+      clipped_grads = []
+      for grad, var in grads:
+          grad = tf.clip_by_norm(grad, 10.0)
+          clipped_grads.append([grad, var])
+      self.train_op = opt.apply_gradients(clipped_grads)
 
       self.saver = tf.train.Saver(max_to_keep=100)
 
@@ -137,6 +147,13 @@ class A3CAgent(object):
     node_non_spatial_id = np.argmax(non_spatial_action[valid_actions])
     node_spatial_id = np.argmax(spatial_action)
     # If training, choose randomly based on weights
+    # if np.isnan(spatial_action).any():
+    #     print('spatial action continas nan')
+    # if np.isnan(non_spatial_action).any():
+    #     print('non spatial action continas nan')
+    # if np.sum(non_spatial_action[valid_actions]) == 0:
+    #     print("DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD")
+    print(non_spatial_action)
     if self.training:
       node_non_spatial_id = np.random.choice(np.arange(len(non_spatial_action[valid_actions])), p=non_spatial_action[valid_actions]/np.sum(non_spatial_action[valid_actions]))
       node_spatial_id = np.random.choice(np.arange(len(spatial_action)), p=spatial_action)
@@ -184,6 +201,7 @@ class A3CAgent(object):
 
   def update(self, rbs, disc, lr, cter):
     # Compute R, which is value of the last observation
+    policy_only = 0 if (cter // 30) % 2 == 0 else 1
     obs = rbs[-1][-1]
     if obs.last():
       R = 0
@@ -229,7 +247,6 @@ class A3CAgent(object):
       player_relative = obs.observation.feature_screen.player_relative
 
       value_target[i] = reward + disc * value_target[i-1]
-
       valid_actions = obs.observation["available_actions"]
       valid_actions = U.compressActions(valid_actions)
       valid_non_spatial_action[i, valid_actions] = 1
@@ -255,6 +272,7 @@ class A3CAgent(object):
             self.valid_non_spatial_action: valid_non_spatial_action,
             self.non_spatial_action_selected: non_spatial_action_selected,
             self.learning_rate: lr,
+            self.policy_only: policy_only
             }
     _, summary = self.sess.run([self.train_op, self.summary_op], feed_dict=feed)
     if self.graph_loss:

@@ -194,7 +194,7 @@ def _main(unused_argv):
     time.sleep(5)
 
   run_thread(agents[-1], FLAGS.map, FLAGS.render, stats)
-
+  #print("HERE WE GFOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO")
   for t in threads:
     t.join()
   summary_writer.close()
