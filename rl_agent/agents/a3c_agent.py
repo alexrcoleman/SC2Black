@@ -67,6 +67,7 @@ class A3CAgent(object):
       self.valid_non_spatial_action = tf.placeholder(tf.float32, [None, len(U.useful_actions)], name='valid_non_spatial_action')
       self.non_spatial_action_selected = tf.placeholder(tf.float32, [None, len(U.useful_actions)], name='non_spatial_action_selected')
       self.value_target = tf.placeholder(tf.float32, [None], name='value_target')
+
       # This will get the probability of choosing a valid action. Given that we force it to choose from
       # the set of valid actions. The probability of an action is the probability the policy chooses
       # divided by the probability of a valid action
@@ -82,13 +83,15 @@ class A3CAgent(object):
 
       # The advantage function, which will represent how much better this action was than what was expected from this state
       advantage = self.value_target - self.value
+      # negative_advantage = tf.where(tf.greater(advantage, 0), advantage, 0)
+      negative_advantage = -tf.nn.relu(-advantage)
 
-      policy_loss = self.getPolicyLoss(action_probability, advantage)
+
+      policy_loss = self.getPolicyLoss(action_probability, negative_advantage)
       value_loss = self.getValueLoss(self.value_target, self.value)
       entropy = self.getEntropy(self.spatial_action, self.valid_spatial_action, self.spatial_action)
 
-
-      loss =  policy_loss + value_loss *.5 + entropy * .01
+      loss =  policy_loss + value_loss *.65# + entropy * .001
 
       if self.graph_loss:
           self.summary.append(tf.summary.scalar('policy',tf.reduce_mean(policy_loss)))
@@ -101,8 +104,9 @@ class A3CAgent(object):
           self.summary_op = []
       # Build the optimizer
       self.learning_rate = tf.placeholder(tf.float32, None, name='learning_rate')
-      opt = tf.train.RMSPropOptimizer(self.learning_rate, decay=0.99, epsilon=1e-10)
+      opt = tf.train.AdamOptimizer()
       grads = opt.compute_gradients(loss)
+
       self.train_op = opt.apply_gradients(grads)
 
       self.saver = tf.train.Saver(max_to_keep=100)
