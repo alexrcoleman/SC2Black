@@ -50,6 +50,11 @@ def _isScalar(i):
   feat = features.SCREEN_FEATURES[i]
   return i == _SCREEN_PLAYER_ID or i == _SCREEN_UNIT_TYPE or i == _SCREEN_SELECTED or feat.type == features.FeatureType.SCALAR
 
+def xy_locs(mask):
+  """Mask should be a set of bools from comparison with a feature layer."""
+  y, x = mask.nonzero()
+  return list(zip(x, y))
+
 use_coords = True
 
 def preprocess_screen(screen):

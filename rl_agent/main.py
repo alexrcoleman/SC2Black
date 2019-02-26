@@ -18,6 +18,7 @@ from pysc2.env import sc2_env
 from pysc2.lib import stopwatch
 import tensorflow as tf
 from run_loop import run_loop
+import datetime
 
 COUNTER = 0
 LOCK = threading.Lock()
@@ -36,7 +37,7 @@ flags.DEFINE_string("map", "DefeatRoaches", "Name of a map to use.")
 flags.DEFINE_bool("render", False, "Whether to render with pygame.")
 flags.DEFINE_integer("screen_resolution", 64, "Resolution for screen feature layers.")
 flags.DEFINE_integer("minimap_resolution", 64, "Resolution for minimap feature layers.")
-flags.DEFINE_integer("step_mul", 4, "Game steps per agent step.")
+flags.DEFINE_integer("step_mul", 8, "Game steps per agent step.")
 
 flags.DEFINE_string("agent", "agents.a3c_agent.A3CAgent", "Which agent to run.")
 flags.DEFINE_string("net", "fcn", "atari or fcn.")
@@ -53,7 +54,12 @@ FLAGS(sys.argv)
 
 TBDIR = ''
 if FLAGS.use_tensorboard:
-    TBDIR = './tboard/' + FLAGS.tensorboard_dir +'//'
+    date = datetime.datetime.now()
+    stamp = date.strftime('%Y.%m.%d_%H.%M')
+    title = FLAGS.map + "_" + stamp + "_x" + str(FLAGS.parallel)
+    if FLAGS.tensorboard_dir != None:
+      title = title + "_" + tensorboard_dir
+    TBDIR = './tboard/' + title
 
 
 if FLAGS.training:
@@ -159,7 +165,8 @@ def _main(unused_argv):
   agents = []
   summary_writer = tf.summary.FileWriter(TBDIR)
   for i in range(PARALLEL):
-    agent = agent_cls(FLAGS.training, FLAGS.screen_resolution, summary_writer, FLAGS.use_tensorboard )
+    # TODO: add flag to make 1/4 be testing
+    agent = agent_cls(FLAGS.training, FLAGS.screen_resolution, FLAGS.force_focus_fire, summary_writer, FLAGS.use_tensorboard )
     agent.build_model(i > 0, DEVICE[i % len(DEVICE)])
     agents.append(agent)
 
