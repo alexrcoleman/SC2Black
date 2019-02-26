@@ -88,8 +88,7 @@ class A3CAgent(object):
       # negative_advantage = tf.where(tf.greater(advantage, 0), advantage, 0)
       negative_advantage = -tf.nn.relu(-advantage)
 
-
-      policy_loss = self.getPolicyLoss(action_probability, negative_advantage)
+      policy_loss = self.getPolicyLoss(action_probability, advantage)
       value_loss = self.getValueLoss(self.value_target, self.value)
       entropy = self.getEntropy(self.spatial_action, self.valid_spatial_action, self.spatial_action)
 
@@ -99,7 +98,7 @@ class A3CAgent(object):
           self.summary.append(tf.summary.scalar('policy',tf.reduce_mean(policy_loss)))
           self.summary.append(tf.summary.scalar('value',tf.reduce_mean(value_loss)))
           self.summary.append(tf.summary.scalar('entropy',tf.reduce_mean(entropy)))
-          self.summary.append(tf.summary.scalar('advantage',tf.reduce_mean(entropy)))
+          self.summary.append(tf.summary.scalar('advantage',tf.reduce_mean(advantage)))
           self.summary.append(tf.summary.scalar('loss',tf.reduce_mean(loss)))
           self.summary_op = tf.summary.merge(self.summary)
           self.summary = []
@@ -238,7 +237,7 @@ class A3CAgent(object):
 
       args = actions.FUNCTIONS[act_id].args
       for arg, act_arg in zip(args, act_args):
-        if arg.name in ('screen', 'minimap', 'screen2'):
+        if arg.name in ('screen', 'minimap', 'screen2') and (!self.force_focus_fire or act_id != 12):
           ind = act_arg[1] * self.ssize + act_arg[0]
           valid_spatial_action[i] = 1
           spatial_action_selected[i, ind] = 1

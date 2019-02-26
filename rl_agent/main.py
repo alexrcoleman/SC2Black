@@ -58,7 +58,7 @@ if FLAGS.use_tensorboard:
     stamp = date.strftime('%Y.%m.%d_%H.%M')
     title = FLAGS.map + "_" + stamp + "_x" + str(FLAGS.parallel)
     if FLAGS.tensorboard_dir != None:
-      title = title + "_" + tensorboard_dir
+      title = title + "_" + FLAGS.tensorboard_dir
     TBDIR = './tboard/' + title
 
 
