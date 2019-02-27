@@ -24,6 +24,9 @@ class A3CAgent(object):
     self.graph_loss = graph_loss
     self.force_focus_fire = force_focus_fire
     self.killed = False
+    self.lastValue = -1
+    self.lastValueTarget = -1
+    self.lastActionName = "None"
 
   def setup(self, sess, writer):
     self.sess = sess
@@ -109,7 +112,6 @@ class A3CAgent(object):
           self.summary.append(tf.summary.scalar('advantage',tf.reduce_mean(advantage)))
           self.summary.append(tf.summary.scalar('loss',tf.reduce_mean(loss)))
           self.summary_op = tf.summary.merge(self.summary)
-          self.summary = []
       else:
           self.summary_op = []
       # Build the optimizer
@@ -133,9 +135,10 @@ class A3CAgent(object):
     feed = {
             self.screen: screen,
             self.info: info}
-    non_spatial_action, spatial_action = self.sess.run(
-      [self.non_spatial_action, self.spatial_action],
+    non_spatial_action, spatial_action, value = self.sess.run(
+      [self.non_spatial_action, self.spatial_action, self.value],
       feed_dict=feed)
+    self.lastValue = value
 
     # Select an action and a spatial target
     non_spatial_action = non_spatial_action.ravel()
@@ -162,6 +165,7 @@ class A3CAgent(object):
     # Map these into actual actions / location
     net_act_id = valid_actions[node_non_spatial_id]
     act_id = U.useful_actions[net_act_id]
+    self.lastActionName = actions.FUNCTIONS[act_id].name
     target = [int(node_spatial_id // self.ssize), int(node_spatial_id % self.ssize)]
 
     if self.force_focus_fire:
@@ -273,7 +277,7 @@ class A3CAgent(object):
             self.valid_non_spatial_action: valid_non_spatial_action,
             self.non_spatial_action_selected: non_spatial_action_selected,
             self.learning_rate: lr,
-            self.policy_only: policy_only
+            self.policy_only: policy_only,
             }
     _, summary = self.sess.run([self.train_op, self.summary_op], feed_dict=feed)
     if self.graph_loss:

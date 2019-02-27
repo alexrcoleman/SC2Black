@@ -19,6 +19,8 @@ from pysc2.lib import stopwatch
 import tensorflow as tf
 from run_loop import run_loop
 import datetime
+import statusgui
+from tkinter import Tk
 
 COUNTER = 0
 LOCK = threading.Lock()
@@ -90,7 +92,7 @@ def run_thread(agent, map_name, visualize, stats):
       use_feature_units=True),
     step_mul=FLAGS.step_mul,
     visualize=visualize) as env:
-    env = available_actions_printer.AvailableActionsPrinter(env)
+    # env = available_actions_printer.AvailableActionsPrinter(env)
     # Only for a single player!
     replay_buffer = []
     for recorder, is_done in run_loop([agent], env, MAX_AGENT_STEPS):
@@ -178,7 +180,7 @@ def _main(unused_argv):
   summary_writer = tf.summary.FileWriter(TBDIR)
   for i in range(PARALLEL):
     # TODO: add flag to make 1/4 be testing
-    agent = agent_cls(FLAGS.training, FLAGS.screen_resolution, FLAGS.force_focus_fire, summary_writer, FLAGS.use_tensorboard )
+    agent = agent_cls(FLAGS.training and (i % 4 != 1), FLAGS.screen_resolution, FLAGS.force_focus_fire, summary_writer, FLAGS.use_tensorboard, 'A3CAgent' + str(i))
     agent.build_model(i > 0, DEVICE[i % len(DEVICE)])
     agents.append(agent)
 
@@ -207,6 +209,17 @@ def _main(unused_argv):
   cmdThread = threading.Thread(target=process_cmd, args=(agents,))
   cmdThread.daemon = True
   cmdThread.start()
+
+  # Setup GUI
+  root = Tk()
+  my_gui = statusgui.StatusGUI(root, agents)
+  def updGUI():
+    my_gui.update()
+    root.after(50, updGUI)
+  updGUI()
+  root.mainloop()
+
+  # Join threads once the user clicks exit or quit (should all be dying)
   for t in threads:
     t.join()
   summary_writer.close()
