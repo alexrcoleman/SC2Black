@@ -6,7 +6,7 @@ import tensorflow as tf
 import tensorflow.contrib.layers as layers
 
 
-def build_net(screen, info, ssize, num_action):
+def build_net(screen, info, custom_input, ssize, num_action):
   # Extract features
   scale_factor = 1
 
@@ -23,7 +23,7 @@ def build_net(screen, info, ssize, num_action):
                          scope='sconv2',
                          activation_fn=tf.nn.relu)
   # TODO: Add extra_input
-  info_fc = layers.fully_connected(layers.flatten(info),
+  info_fc = layers.fully_connected(tf.concat([info,custom_input], axis=1),
                                    num_outputs=256,
                                    activation_fn=tf.nn.relu,
                                    scope='info_fc')

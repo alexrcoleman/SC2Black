@@ -27,7 +27,7 @@ LOCK = threading.Lock()
 FLAGS = flags.FLAGS
 flags.DEFINE_bool("training", True, "Whether to train agents.")
 flags.DEFINE_bool("continuation", False, "Continuously training.")
-flags.DEFINE_float("learning_rate", 5e-5, "Learning rate for training.")
+flags.DEFINE_float("learning_rate", 5e-6, "Learning rate for training.")
 flags.DEFINE_float("discount", 0.99, "Discount rate for future rewards.")
 flags.DEFINE_integer("max_steps", int(1e5), "Total steps for training.")
 flags.DEFINE_integer("snapshot_step", int(1e3), "Step for snapshot.")
@@ -66,11 +66,11 @@ if FLAGS.use_tensorboard:
 
 if FLAGS.training:
   PARALLEL = FLAGS.parallel
-  MAX_AGENT_STEPS = FLAGS.max_agent_steps
+  MAX_AGENT_STEPS = min(FLAGS.max_agent_steps, (120 * 16) // FLAGS.step_mul)
   DEVICE = ['/gpu:'+dev for dev in FLAGS.device.split(',')]
 else:
   PARALLEL = 1
-  MAX_AGENT_STEPS = 1e5
+  MAX_AGENT_STEPS = (120 * 16) // FLAGS.step_mul
   DEVICE = ['/cpu:0']
 
 LOG = FLAGS.log_path+FLAGS.map+'/'+FLAGS.net
@@ -82,7 +82,7 @@ if not os.path.exists(SNAPSHOT):
   os.makedirs(SNAPSHOT)
 
 average = 0
-def run_thread(agent, map_name, visualize, stats):
+def run_thread(agent, map_name, visualize, stats, summary_writer):
   global COUNTER, average
   with sc2_env.SC2Env(
     map_name=map_name,
@@ -95,7 +95,7 @@ def run_thread(agent, map_name, visualize, stats):
     # env = available_actions_printer.AvailableActionsPrinter(env)
     # Only for a single player!
     replay_buffer = []
-    for recorder, is_done in run_loop([agent], env, MAX_AGENT_STEPS):
+    for recorder, is_done in run_loop(agent, env, MAX_AGENT_STEPS):
       if FLAGS.training:
         replay_buffer.append(recorder)
         if is_done:
@@ -128,16 +128,21 @@ def run_thread(agent, map_name, visualize, stats):
         score = obs["score_cumulative"][0]
         print('Your score is '+str(score)+'!')
       if is_done:
-         addScore(obs["score_cumulative"][0])
+         addScore(obs["score_cumulative"][0], summary_writer)
+
+
       if agent.killed:
         break
 
     if FLAGS.save_replay:
       env.save_replay(agent.name)
 
-def addScore(score):
+def addScore(score, summary_writer):
     global scoreQueue, COUNTER
+    sum = tf.Summary()
+    sum.value.add(tag='score',simple_value=score)
     with LOCK:
+        summary_writer.add_summary(sum, COUNTER)
         scoreQueue.append(score)
 
 def runningAverage(list, size):
@@ -180,7 +185,7 @@ def _main(unused_argv):
   summary_writer = tf.summary.FileWriter(TBDIR)
   for i in range(PARALLEL):
     # TODO: add flag to make 1/4 be testing
-    agent = agent_cls(FLAGS.training and (i % 4 != 1), FLAGS.screen_resolution, FLAGS.force_focus_fire, summary_writer, FLAGS.use_tensorboard, 'A3CAgent' + str(i))
+    agent = agent_cls(FLAGS.training and (i % 40 != 39), FLAGS.screen_resolution, FLAGS.force_focus_fire, summary_writer, FLAGS.use_tensorboard, 'A3CAgent' + str(i))
     agent.build_model(i > 0, DEVICE[i % len(DEVICE)])
     agents.append(agent)
 
@@ -201,7 +206,7 @@ def _main(unused_argv):
   # Run threads
   threads = []
   for i in range(PARALLEL):
-    t = threading.Thread(target=run_thread, args=(agents[i], FLAGS.map, i == 0 and FLAGS.render, stats))
+    t = threading.Thread(target=run_thread, args=(agents[i], FLAGS.map, i == 0 and FLAGS.render, stats, summary_writer))
     threads.append(t)
     t.daemon = True
     t.start()
@@ -224,7 +229,7 @@ def _main(unused_argv):
     t.join()
   summary_writer.close()
 
-  steps = min(FLAGS.max_agent_steps * FLAGS.step_mul, 1920)
+  steps = min(MAX_AGENT_STEPS * FLAGS.step_mul, 1920)
   print("Showing score graphs")
   plt.title("Score over Time - %s x%d %.1fs" % (FLAGS.map, FLAGS.parallel, steps / 16))
   plt.ylabel('Score')

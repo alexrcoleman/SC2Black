@@ -20,6 +20,7 @@ class A3CAgent(object):
     self.training = training
     self.ssize = ssize
     self.isize = len(U.useful_actions)
+    self.custom_input_size = 1 + len(U.useful_actions)
     self.summary = []
     self.graph_loss = graph_loss
     self.force_focus_fire = force_focus_fire
@@ -50,7 +51,7 @@ class A3CAgent(object):
   def getEntropy(self, policy, spatial_policy, valid_spatial):
       policy = tf.clip_by_value(policy, 1e-10, 1.)
       spatial_policy = tf.clip_by_value(spatial_policy, 1e-10, 1.)
-      return -tf.reduce_sum((tf.reduce_sum(policy * tf.log(policy)) + .1 * valid_spatial * tf.reduce_sum(spatial_policy * tf.log(spatial_policy))))
+      return -tf.reduce_sum((tf.reduce_sum(policy * tf.log(policy)) +  valid_spatial * tf.reduce_sum(spatial_policy * tf.log(spatial_policy))))
 
 
   def build_model(self, reuse, dev):
@@ -62,9 +63,10 @@ class A3CAgent(object):
       # Set inputs of networks
       self.screen = tf.placeholder(tf.float32, [None, U.screen_channel(), self.ssize, self.ssize], name='screen')
       self.info = tf.placeholder(tf.float32, [None, self.isize], name='info')
+      self.custom_inputs = tf.placeholder(tf.float32, [None, self.custom_input_size], name='custom_input')
 
       # Build networks
-      net = build_net(self.screen, self.info,  self.ssize, len(U.useful_actions))
+      net = build_net(self.screen, self.info, self.custom_inputs ,self.ssize, len(U.useful_actions))
       self.spatial_action, self.non_spatial_action, self.value = net
 
       # Set targets and masks
@@ -116,7 +118,7 @@ class A3CAgent(object):
           self.summary_op = []
       # Build the optimizer
       self.learning_rate = tf.placeholder(tf.float32, None, name='learning_rate')
-      opt = tf.train.AdamOptimizer()
+      opt = tf.train.RMSPropOptimizer(self.learning_rate, decay=0.99, epsilon=1e-10)
       grads = opt.compute_gradients(loss)
       clipped_grads = []
       for grad, var in grads:
@@ -126,15 +128,18 @@ class A3CAgent(object):
 
       self.saver = tf.train.Saver(max_to_keep=100)
 
+
   def step(self, obs):
     screen = np.array(obs.observation['feature_screen'], dtype=np.float32)
     screen = np.expand_dims(U.preprocess_screen(screen), axis=0)
     info = np.zeros([1, self.isize], dtype=np.float32)
     info[0, U.compressActions(obs.observation['available_actions'])] = 1
+    custom_inputs = np.expand_dims(np.array(obs.observation.custom_inputs, dtype=np.float32),axis=0)
 
     feed = {
             self.screen: screen,
-            self.info: info}
+            self.info: info,
+            self.custom_inputs: custom_inputs,}
     non_spatial_action, spatial_action, value = self.sess.run(
       [self.non_spatial_action, self.spatial_action, self.value],
       feed_dict=feed)
@@ -224,6 +229,7 @@ class A3CAgent(object):
     # Compute targets and masks
     screens = []
     infos = []
+    custom_inputs = []
 
     value_target = np.zeros([len(rbs)], dtype=np.float32)
     value_target[-1] = R
@@ -238,9 +244,10 @@ class A3CAgent(object):
       screen = np.expand_dims(U.preprocess_screen(screen), axis=0)
       info = np.zeros([1, self.isize], dtype=np.float32)
       info[0, U.compressActions(obs.observation['available_actions'])] = 1
-
+      custom_input = np.asarray(obs.observation.custom_inputs, dtype=np.float32)
       screens.append(screen)
       infos.append(info)
+      custom_inputs.append(custom_input)
 
       reward = obs.reward
       # TODO: Here is where we can add pseudo-reward (e.g. for hitting a roach)
@@ -271,6 +278,7 @@ class A3CAgent(object):
     feed = {
             self.screen: screens,
             self.info: infos,
+            self.custom_inputs: custom_inputs,
             self.value_target: value_target,
             self.valid_spatial_action: valid_spatial_action,
             self.spatial_action_selected: spatial_action_selected,
