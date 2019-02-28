@@ -31,6 +31,7 @@ class AgentPanel:
     self.agent = agent
     self.root = root
     self.value_text = StringVar()
+    self.actions_probs_text = StringVar()
     self.action_text = StringVar()
 
     tab = Frame(root)
@@ -38,11 +39,14 @@ class AgentPanel:
 
     value = Label(tab, textvariable=self.value_text)
     action = Label(tab, textvariable=self.action_text)
+    action_prob = Label(tab, textvariable=self.actions_probs_text)
     button = Button(tab, text = 'Print agent', command = lambda:print(agent))
     value.grid()
     action.grid()
+    action_prob.grid()
     button.grid()
 
   def update(self):
     self.value_text.set(self.agent.lastValue)
     self.action_text.set(self.agent.lastActionName)
+    self.actions_probs_text.set(self.agent.lastActionProbs)

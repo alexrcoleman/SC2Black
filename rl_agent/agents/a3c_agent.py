@@ -9,8 +9,9 @@ from pysc2.lib import actions
 from pysc2.lib import features
 
 from agents.network import build_net
+from agents.network import build_atari
 import utils as U
-
+import random
 
 class A3CAgent(object):
 
@@ -28,6 +29,7 @@ class A3CAgent(object):
     self.lastValue = -1
     self.lastValueTarget = -1
     self.lastActionName = "None"
+    self.lastActionProbs = "None"
 
   def setup(self, sess, writer):
     self.sess = sess
@@ -44,14 +46,13 @@ class A3CAgent(object):
 
 
   def getValueLoss(self, value_target, value_prediction):
-      #return tf.reduce_sum(tf.square(value_target - tf.reshape(value_prediction,[-1])))
       return tf.reduce_sum(tf.square(value_target - value_prediction))
 
 
   def getEntropy(self, policy, spatial_policy, valid_spatial):
       policy = tf.clip_by_value(policy, 1e-10, 1.)
       spatial_policy = tf.clip_by_value(spatial_policy, 1e-10, 1.)
-      return -tf.reduce_sum((tf.reduce_sum(policy * tf.log(policy)) +  valid_spatial * tf.reduce_sum(spatial_policy * tf.log(spatial_policy))))
+      return -tf.reduce_sum((tf.reduce_sum(policy * tf.log(policy)) +  tf.reduce_sum(spatial_policy * tf.log(spatial_policy))))
 
 
   def build_model(self, reuse, dev):
@@ -66,7 +67,7 @@ class A3CAgent(object):
       self.custom_inputs = tf.placeholder(tf.float32, [None, self.custom_input_size], name='custom_input')
 
       # Build networks
-      net = build_net(self.screen, self.info, self.custom_inputs ,self.ssize, len(U.useful_actions))
+      net = build_atari(self.screen, self.info, self.custom_inputs ,self.ssize, len(U.useful_actions))
       self.spatial_action, self.non_spatial_action, self.value = net
 
       # Set targets and masks
@@ -96,7 +97,7 @@ class A3CAgent(object):
 
       policy_loss = self.getPolicyLoss(action_probability, advantage)
       value_loss = self.getValueLoss(self.value_target, self.value)
-      entropy = self.getEntropy(self.spatial_action, self.valid_spatial_action, self.spatial_action)
+      entropy = self.getEntropy(self.non_spatial_action, self.spatial_action, self.valid_spatial_action)
       # print("POLICTY LOSS", policy_loss.shape)
       # print("Value LOSS", value_loss.shape)
       # print("entropy", entropy.shape)
@@ -118,11 +119,11 @@ class A3CAgent(object):
           self.summary_op = []
       # Build the optimizer
       self.learning_rate = tf.placeholder(tf.float32, None, name='learning_rate')
-      opt = tf.train.RMSPropOptimizer(self.learning_rate, decay=0.99, epsilon=1e-10)
+      opt = tf.train.AdamOptimizer(self.learning_rate)
       grads = opt.compute_gradients(loss)
       clipped_grads = []
       for grad, var in grads:
-          grad = tf.clip_by_norm(grad, 10.0)
+          grad = tf.clip_by_norm(grad, 40.0)
           clipped_grads.append([grad, var])
       self.train_op = opt.apply_gradients(clipped_grads)
 
@@ -163,7 +164,7 @@ class A3CAgent(object):
     # if np.sum(non_spatial_action[valid_actions]) == 0:
     #     print("DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD")
     #print(non_spatial_action)
-    if self.training:
+    if self.training and random.random() < .1:
       node_non_spatial_id = np.random.choice(np.arange(len(non_spatial_action[valid_actions])), p=non_spatial_action[valid_actions]/np.sum(non_spatial_action[valid_actions]))
       node_spatial_id = np.random.choice(np.arange(len(spatial_action)), p=spatial_action)
 
@@ -171,6 +172,7 @@ class A3CAgent(object):
     net_act_id = valid_actions[node_non_spatial_id]
     act_id = U.useful_actions[net_act_id]
     self.lastActionName = actions.FUNCTIONS[act_id].name
+    self.lastActionProbs = non_spatial_action
     target = [int(node_spatial_id // self.ssize), int(node_spatial_id % self.ssize)]
 
     if self.force_focus_fire:
