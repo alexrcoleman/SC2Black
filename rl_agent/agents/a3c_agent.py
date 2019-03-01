@@ -52,7 +52,7 @@ class A3CAgent(object):
   def getEntropy(self, policy, spatial_policy, valid_spatial):
       policy = tf.clip_by_value(policy, 1e-10, 1.)
       spatial_policy = tf.clip_by_value(spatial_policy, 1e-10, 1.)
-      return -tf.reduce_sum((tf.reduce_sum(policy * tf.log(policy)) +  tf.reduce_sum(spatial_policy * tf.log(spatial_policy))))
+      return tf.reduce_sum((tf.reduce_sum(policy * tf.log(policy)) +  tf.reduce_sum(spatial_policy * tf.log(spatial_policy))))
 
 
   def build_model(self, reuse, dev):
@@ -222,11 +222,14 @@ class A3CAgent(object):
       screen = np.expand_dims(U.preprocess_screen(screen), axis=0)
       info = np.zeros([1, self.isize], dtype=np.float32)
       info[0, U.compressActions(obs.observation['available_actions'])] = 1
+      custom_inputs = np.expand_dims(np.array(obs.observation.custom_inputs, dtype=np.float32),axis=0)
 
       feed = {
-              self.screen: screen,
-              self.info: info}
-      R = self.sess.run(self.value, feed_dict=feed)[0]
+        self.screen: screen,
+        self.info: info,
+        self.custom_inputs: custom_inputs,}
+
+      R = self.sess.run(self.value, feed_dict=feed)[-1]
 
     # Compute targets and masks
     screens = []
@@ -234,7 +237,8 @@ class A3CAgent(object):
     custom_inputs = []
 
     value_target = np.zeros([len(rbs)], dtype=np.float32)
-    value_target[-1] = R
+    value_target[0] = R
+
 
     valid_spatial_action = np.zeros([len(rbs)], dtype=np.float32)
     spatial_action_selected = np.zeros([len(rbs), self.ssize**2], dtype=np.float32)
@@ -259,8 +263,8 @@ class A3CAgent(object):
 
 
       player_relative = obs.observation.feature_screen.player_relative
-
-      value_target[i] = reward + disc * value_target[i-1]
+      if i != 0:
+          value_target[i] = reward + disc * value_target[i-1]
       valid_actions = obs.observation["available_actions"]
       valid_actions = U.compressActions(valid_actions)
       valid_non_spatial_action[i, valid_actions] = 1

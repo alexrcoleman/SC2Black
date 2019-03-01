@@ -44,7 +44,8 @@ def run_loop(agent, env, max_frames=0):
 
         # phase = 1 - phase
         obs = env.step([act])[0]
-
+        ### HACKY FIX !!!
+        obs.observation.custom_inputs = np.concatenate([[norm_step],last_act_onehot], axis = 0)
         # Real time (technically should be 1/16 * steps_mul)
         # if False:
         #   time.sleep(.25)

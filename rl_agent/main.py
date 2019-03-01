@@ -67,7 +67,7 @@ if FLAGS.use_tensorboard:
 if FLAGS.training:
   PARALLEL = FLAGS.parallel
   MAX_AGENT_STEPS = min(FLAGS.max_agent_steps, (120 * 16) // FLAGS.step_mul)
-  DEVICE = ['/gpu:'+dev for dev in FLAGS.device.split(',')]
+  DEVICE = ['/cpu:0']
 else:
   PARALLEL = 1
   MAX_AGENT_STEPS = (120 * 16) // FLAGS.step_mul
@@ -95,7 +95,10 @@ def run_thread(agent, map_name, visualize, stats, summary_writer):
     # env = available_actions_printer.AvailableActionsPrinter(env)
     # Only for a single player!
     replay_buffer = []
+    update_steps = 20
+    game_step = 0
     for recorder, is_done in run_loop(agent, env, MAX_AGENT_STEPS):
+      game_step += 1
       if FLAGS.training:
         replay_buffer.append(recorder)
         if is_done:
@@ -122,6 +125,14 @@ def run_thread(agent, map_name, visualize, stats, summary_writer):
             agent.save_model(SNAPSHOT, counter)
           if counter >= FLAGS.max_steps:
             break
+        elif update_steps % game_step == 0:
+            counter = 0
+            with LOCK:
+              COUNTER += 1
+              counter = COUNTER
+            learning_rate = FLAGS.learning_rate * (1 - 0.9 * counter / FLAGS.max_steps)
+            agent.update(replay_buffer, FLAGS.discount, learning_rate, counter)
+            replay_buffer = []
 
       elif is_done:
         obs = recorder[-1].observation
