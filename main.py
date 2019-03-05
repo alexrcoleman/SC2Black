@@ -112,6 +112,7 @@ def run_thread(agent, map_name, visualize, summary_writer):
           obs = recorder[-1].observation
           score = obs["score_cumulative"][0]
           print('Your score is '+str(score)+'! counter is ' + str(counter))
+          inGameScore(score)
           if counter % 100 == 0:
             print('Average is ' + str(average))
             average = score
@@ -166,12 +167,25 @@ def runningAverage(list, size):
             nlist.append(sum/size)
     return nlist
 
+def inGameScore(score):
+    global statsQueue
+    statsQueue.append(score)
+	
+def printList(statList, file):
+    # Open csv file
+    i = 0
+    stats = open(file, mode='w')
+    stats.write("Elements: " + str(len(statList)) + ",")
+    for x in statList:
+       stats.write(str(x) + ",")
+    #Move to a new line and skip the element quantity
+    stats.write("\n ,")
+	#List the corresponding element number below the value
+    for x in statList:
+       i = i + 1
+       stats.write(str(i) + ",")
 
-def printList(statList):
-  # Open text file
-  stats = open("scoreStatistic.csv", mode='w')
-  for x in statList:
-     stats.write(str(x) + ",")
+	
 
 def process_cmd(agents):
   while True:
@@ -213,6 +227,8 @@ def _main(unused_argv):
   if not FLAGS.training or FLAGS.continuation:
     global COUNTER
     COUNTER = agent.load_model(SNAPSHOT)
+  global statsQueue
+  statsQueue = []
   global scoreQueue
   scoreQueue = []
 
@@ -241,7 +257,7 @@ def _main(unused_argv):
   for t in threads:
     t.join()
   summary_writer.close()
-  printList(scoreQueue)
+  printList(statsQueue, "scoreStatistic.csv")
 
   steps = min(MAX_AGENT_STEPS * FLAGS.step_mul, 1920)
   print("Showing score graphs")
