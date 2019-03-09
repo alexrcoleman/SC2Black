@@ -54,6 +54,8 @@ class A3CAgent(object):
       spatial_policy = tf.clip_by_value(spatial_policy, 1e-10, 1.)
       return tf.reduce_sum((tf.reduce_sum(policy * tf.log(policy)) +  tf.reduce_sum(spatial_policy * tf.log(spatial_policy))))
 
+  def getMinRoachHealthLoss(self, roach_target, roach_prediction):
+     return tf.reduce_sum(tf.reduce_sum(tf.square(roach_target - roach_prediction)))
 
   def build_model(self, reuse, dev):
     with tf.variable_scope(self.name) and tf.device(dev):
@@ -67,8 +69,8 @@ class A3CAgent(object):
       self.custom_inputs = tf.placeholder(tf.float32, [None, self.custom_input_size], name='custom_input')
 
       # Build networks
-      net = build_atari(self.screen, self.info, self.custom_inputs ,self.ssize, len(U.useful_actions))
-      self.spatial_action, self.non_spatial_action, self.value = net
+      net = build_net(self.screen, self.info, self.custom_inputs ,self.ssize, len(U.useful_actions))
+      self.spatial_action, self.non_spatial_action, self.value, self.min_health_roach_prediction = net
 
       # Set targets and masks
       self.valid_spatial_action = tf.placeholder(tf.float32, [None], name='valid_spatial_action')
@@ -76,7 +78,8 @@ class A3CAgent(object):
       self.valid_non_spatial_action = tf.placeholder(tf.float32, [None, len(U.useful_actions)], name='valid_non_spatial_action')
       self.non_spatial_action_selected = tf.placeholder(tf.float32, [None, len(U.useful_actions)], name='non_spatial_action_selected')
       self.value_target = tf.placeholder(tf.float32, [None], name='value_target')
-      self.policy_only = tf.placeholder(tf.float32, shape=(), name='policy_only')
+      self.min_health_roach_location = tf.placeholder(tf.float32, [None, self.ssize**2], name='min_health_roach_location')
+
       # This will get the probability of choosing a valid action. Given that we force it to choose from
       # the set of valid actions. The probability of an action is the probability the policy chooses
       # divided by the probability of a valid action
@@ -85,6 +88,9 @@ class A3CAgent(object):
 
       # Here we compute the probability of the spatial action. If the action selected was non spactial,
       # the probability will be one.
+      # print(self.spatial_action.shape)
+      # print(self.spatial_action_selected.shape)
+      # print(self.valid_spatial_action.shape)
       spatial_action_prob = (self.valid_spatial_action * tf.reduce_sum(self.spatial_action * self.spatial_action_selected) )+(1.0 - self.valid_spatial_action)
 
       # The probability of the action will be the the product of the non spatial and the spatial prob
@@ -98,13 +104,16 @@ class A3CAgent(object):
       policy_loss = self.getPolicyLoss(action_probability, advantage)
       value_loss = self.getValueLoss(self.value_target, self.value)
       entropy = self.getEntropy(self.non_spatial_action, self.spatial_action, self.valid_spatial_action)
+     # min_health_roach_loss = self.getMinRoachHealthLoss(self.min_health_roach_location, self.min_health_roach_prediction)
+      min_health_roach_loss = tf.reduce_sum(tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.min_health_roach_prediction, labels=self.min_health_roach_location))
       # print("POLICTY LOSS", policy_loss.shape)
       # print("Value LOSS", value_loss.shape)
       # print("entropy", entropy.shape)
       # print("spatial shape", spatial_action_prob.shape)
       # print("adv", advantage.shape)
 
-      loss = self.policy_only * policy_loss + (1 - self.policy_only) * value_loss + entropy * .08
+      self.entropy_rate = tf.placeholder(tf.float32, None, name='entropy_rate')
+      loss =  policy_loss + value_loss *.5 + min_health_roach_loss*.5  + entropy * self.entropy_rate
 
       # loss = policy_loss +  .5 * value_loss + entropy * .05
 
@@ -114,6 +123,7 @@ class A3CAgent(object):
           self.summary.append(tf.summary.scalar('entropy',tf.reduce_mean(entropy)))
           self.summary.append(tf.summary.scalar('advantage',tf.reduce_mean(advantage)))
           self.summary.append(tf.summary.scalar('loss',tf.reduce_mean(loss)))
+          self.summary.append(tf.summary.scalar('min_roach', tf.reduce_mean(min_health_roach_loss)))
           self.summary_op = tf.summary.merge(self.summary)
       else:
           self.summary_op = []
@@ -154,22 +164,19 @@ class A3CAgent(object):
 
 
     # Take the node highest with the most weight
-    node_non_spatial_id = np.argmax(non_spatial_action[valid_actions])
+    node_non_spatial_id = 0
+    if len(non_spatial_action[valid_actions]) > 0:
+        node_non_spatial_id = np.argmax(non_spatial_action[valid_actions])
     node_spatial_id = np.argmax(spatial_action)
-    # If training, choose randomly based on weights
-    # if np.isnan(spatial_action).any():
-    #     print('spatial action continas nan')
-    # if np.isnan(non_spatial_action).any():
-    #     print('non spatial action continas nan')
-    # if np.sum(non_spatial_action[valid_actions]) == 0:
-    #     print("DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD")
-    #print(non_spatial_action)
-    if self.training and random.random() < .1:
-      node_non_spatial_id = np.random.choice(np.arange(len(non_spatial_action[valid_actions])), p=non_spatial_action[valid_actions]/np.sum(non_spatial_action[valid_actions]))
-      node_spatial_id = np.random.choice(np.arange(len(spatial_action)), p=spatial_action)
+
+    # if False and  self.training:
+    #   node_non_spatial_id = np.random.choice(np.arange(len(non_spatial_action[valid_actions])), p=non_spatial_action[valid_actions]/np.sum(non_spatial_action[valid_actions]))
+    #   node_spatial_id = np.random.choice(np.arange(len(spatial_action)), p=spatial_action)
 
     # Map these into actual actions / location
-    net_act_id = valid_actions[node_non_spatial_id]
+    net_act_id = 0
+    if len(valid_actions) > 0 :
+        net_act_id = valid_actions[node_non_spatial_id]
     act_id = U.useful_actions[net_act_id]
     self.lastActionName = actions.FUNCTIONS[act_id].name
     self.lastActionProbs = non_spatial_action
@@ -211,9 +218,8 @@ class A3CAgent(object):
     return actions.FunctionCall(act_id, act_args)
 
 
-  def update(self, rbs, disc, lr, cter):
+  def update(self, rbs, disc, lr, cter, er):
     # Compute R, which is value of the last observation
-    policy_only = 0 if (cter // 30) % 2 == 0 else 1
     obs = rbs[-1][-1]
     if obs.last():
       R = 0
@@ -244,6 +250,8 @@ class A3CAgent(object):
     spatial_action_selected = np.zeros([len(rbs), self.ssize**2], dtype=np.float32)
     valid_non_spatial_action = np.zeros([len(rbs), len(U.useful_actions)], dtype=np.float32)
     non_spatial_action_selected = np.zeros([len(rbs), len(U.useful_actions)], dtype=np.float32)
+    min_health_roach_location = np.zeros([len(rbs), self.ssize**2], dtype=np.float32)
+
     rbs.reverse()
     for i, [obs, action, next_obs] in enumerate(rbs):
       screen = np.array(obs.observation['feature_screen'], dtype=np.float32)
@@ -254,6 +262,25 @@ class A3CAgent(object):
       screens.append(screen)
       infos.append(info)
       custom_inputs.append(custom_input)
+
+      player_relative = obs.observation.feature_screen.player_relative
+      marines = U.xy_locs(player_relative == features.PlayerRelative.SELF)
+      marine_xy = [0,0]
+      if len(marines) > 0:
+          marine_xy = np.mean(marines, axis=0).round()
+
+      roaches = [unit for unit in obs.observation.feature_units if unit.alliance == features.PlayerRelative.ENEMY]
+      best_roach = 0
+      minHealth = 1000000
+      minDist = 0
+      for roach in roaches:
+        hp = roach.health
+        dist = np.sqrt((marine_xy[0]-roach.x)**2 + (marine_xy[1]-roach.y)**2)
+        if hp < minHealth or (hp == minHealth and dist < minDist):
+          minHealth = hp
+          minDist = dist
+          best_roach = roach
+      min_health_roach_location[i][best_roach.y * self.ssize + best_roach.x] = 1.0
 
       reward = obs.reward
       # TODO: Here is where we can add pseudo-reward (e.g. for hitting a roach)
@@ -291,7 +318,8 @@ class A3CAgent(object):
             self.valid_non_spatial_action: valid_non_spatial_action,
             self.non_spatial_action_selected: non_spatial_action_selected,
             self.learning_rate: lr,
-            self.policy_only: policy_only,
+            self.entropy_rate: er,
+            self.min_health_roach_location: min_health_roach_location,
             }
     _, summary = self.sess.run([self.train_op, self.summary_op], feed_dict=feed)
     if self.graph_loss:

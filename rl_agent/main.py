@@ -29,12 +29,12 @@ flags.DEFINE_bool("training", True, "Whether to train agents.")
 flags.DEFINE_bool("continuation", False, "Continuously training.")
 flags.DEFINE_float("learning_rate", 2e-5, "Learning rate for training.")
 flags.DEFINE_float("discount", 0.99, "Discount rate for future rewards.")
-flags.DEFINE_integer("max_steps", int(1e5), "Total steps for training.")
+flags.DEFINE_integer("max_steps", int(1e6), "Total steps for training.")
 flags.DEFINE_integer("snapshot_step", int(1e3), "Step for snapshot.")
 flags.DEFINE_string("snapshot_path", "./snapshot/", "Path for snapshot.")
 flags.DEFINE_string("log_path", "./log/", "Path for log.")
 flags.DEFINE_string("device", "0", "Device for training.")
-
+flags.DEFINE_float("entropy_rate", .08, "entropy weight")
 flags.DEFINE_string("map", "DefeatRoaches", "Name of a map to use.")
 flags.DEFINE_bool("render", False, "Whether to render with pygame.")
 flags.DEFINE_integer("screen_resolution", 64, "Resolution for screen feature layers.")
@@ -95,7 +95,7 @@ def run_thread(agent, map_name, visualize, stats, summary_writer):
     # env = available_actions_printer.AvailableActionsPrinter(env)
     # Only for a single player!
     replay_buffer = []
-    update_steps = 20
+    update_steps = 100
     game_step = 0
     for recorder, is_done in run_loop(agent, env, MAX_AGENT_STEPS):
       game_step += 1
@@ -108,7 +108,8 @@ def run_thread(agent, map_name, visualize, stats, summary_writer):
             counter = COUNTER
           # Learning rate schedule
           learning_rate = FLAGS.learning_rate * (1 - 0.9 * counter / FLAGS.max_steps)
-          agent.update(replay_buffer, FLAGS.discount, learning_rate, counter)
+          entropy_rate = FLAGS.entropy_rate * (1 - 0.99 * counter/ FLAGS.max_steps)
+          agent.update(replay_buffer, FLAGS.discount, learning_rate, counter, entropy_rate)
           obs = recorder[-1].observation
           score = obs["score_cumulative"][0]
           print('Your score is '+str(score)+'! counter is ' + str(counter))
@@ -131,7 +132,8 @@ def run_thread(agent, map_name, visualize, stats, summary_writer):
               COUNTER += 1
               counter = COUNTER
             learning_rate = FLAGS.learning_rate * (1 - 0.9 * counter / FLAGS.max_steps)
-            agent.update(replay_buffer, FLAGS.discount, learning_rate, counter)
+            entropy_rate = FLAGS.entropy_rate * (1 - 0.99 * counter/ FLAGS.max_steps)
+            agent.update(replay_buffer, FLAGS.discount, learning_rate, counter, entropy_rate)
             replay_buffer = []
 
       elif is_done:

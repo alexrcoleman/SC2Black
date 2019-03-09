@@ -14,7 +14,7 @@ _SCREEN_SELECTED = features.SCREEN_FEATURES.selected.index
 useful_screens = [
 #4, # player_id
 5, # player_relative
-7, # selected
+# 7, # selected
 #8, # unit_hit_points
 9, # unit_hit_points_ratio
 #14, # unit_density
@@ -22,7 +22,7 @@ useful_screens = [
 ]
 useful_actions = [
 0, # no_op
-2, # select_point
+# 2, # select_point
 #3, # select_rect
 #4, # select_control_group
 #5, # select_unit
