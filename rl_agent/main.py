@@ -34,7 +34,7 @@ flags.DEFINE_integer("snapshot_step", int(1e3), "Step for snapshot.")
 flags.DEFINE_string("snapshot_path", "./snapshot/", "Path for snapshot.")
 flags.DEFINE_string("log_path", "./log/", "Path for log.")
 flags.DEFINE_string("device", "0", "Device for training.")
-flags.DEFINE_float("entropy_rate", .08, "entropy weight")
+flags.DEFINE_float("entropy_rate", .03, "entropy weight")
 flags.DEFINE_string("map", "DefeatRoaches", "Name of a map to use.")
 flags.DEFINE_bool("render", False, "Whether to render with pygame.")
 flags.DEFINE_integer("screen_resolution", 64, "Resolution for screen feature layers.")
@@ -50,7 +50,7 @@ flags.DEFINE_bool("trace", False, "Whether to trace the code execution.")
 flags.DEFINE_integer("parallel", 1, "How many instances to run in parallel.")
 flags.DEFINE_bool("save_replay", False, "Whether to save a replay at the end.")
 flags.DEFINE_bool("force_focus_fire", False, "Whether to force focus firing (i.e. all 'attack' actions will redirect to lowest health / closest roach)")
-flags.DEFINE_bool("use_tensorboard", False, "weather or not to use usetensorboard")
+flags.DEFINE_bool("use_tensorboard", True, "weather or not to use usetensorboard")
 flags.DEFINE_string("tensorboard_dir", None, "directory for tb")
 FLAGS(sys.argv)
 
@@ -67,7 +67,7 @@ if FLAGS.use_tensorboard:
 if FLAGS.training:
   PARALLEL = FLAGS.parallel
   MAX_AGENT_STEPS = min(FLAGS.max_agent_steps, (120 * 16) // FLAGS.step_mul)
-  DEVICE = ['/cpu:0']
+  DEVICE = ['/gpu:0']
 else:
   PARALLEL = 1
   MAX_AGENT_STEPS = (120 * 16) // FLAGS.step_mul

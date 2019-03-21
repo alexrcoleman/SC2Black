@@ -22,10 +22,13 @@ useful_screens = [
 ]
 useful_actions = [
 0, # no_op
-# 2, # select_point
+2, # select_point
 #3, # select_rect
 #4, # select_control_group
 #5, # select_unit
+# ^ this let's you adjust something in your selection; could be useful because
+# your agent could look at the health of units from multiselection from that special feature
+# and grab the lowest hp one; since we don't have that though, its off
 7, # select_army
 12, # Attack_screen
 #274, # HoldPosition_quick
@@ -54,6 +57,47 @@ def xy_locs(mask):
   """Mask should be a set of bools from comparison with a feature layer."""
   y, x = mask.nonzero()
   return list(zip(x, y))
+
+# Find the lowest health marine "in danger"
+def getDangerousMarineLoc(obs):
+  feature_marines = [unit for unit in obs.observation.feature_units if unit.alliance == features.PlayerRelative.SELF]
+  best_marine = None
+  best_roach = getLowestHealthRoach(obs)
+  if best_roach is None:
+    return None
+  minHealth = 1000000
+  for marine in feature_marines:
+    hp = marine.health_ratio / 255
+    dist = np.sqrt((marine.x-best_roach[1])**2 + (marine.y-best_roach[0])**2)
+    if hp < .5 and dist < 15:
+      if hp < minHealth:
+        best_marine = marine
+        minHealth = hp
+  if not best_marine is None:
+    best_marine = [best_marine.y, best_marine.x]
+  return best_marine
+
+# Find the nearest low roach and save it so we know to attack with it
+def getLowestHealthRoach(obs):
+  player_relative = obs.observation.feature_screen.player_relative
+  marines = xy_locs(player_relative == features.PlayerRelative.SELF)
+  marine_xy = np.mean(marines, axis=0).round()
+
+  roaches = [unit for unit in obs.observation.feature_units if unit.alliance == features.PlayerRelative.ENEMY]
+  best_roach = None
+  minHealth = 1000000
+  minDist = 0
+  for roach in roaches:
+    hp = roach.health
+    dist = np.sqrt((marine_xy[0]-roach.x)**2 + (marine_xy[1]-roach.y)**2)
+    if hp < minHealth or (hp == minHealth and dist < minDist):
+      minHealth = hp
+      minDist = dist
+      best_roach = roach
+  if not best_roach is None:
+    best_roach = [best_roach.y, best_roach.x]
+  return best_roach
+
 
 use_coords = True
 
