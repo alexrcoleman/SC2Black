@@ -16,24 +16,22 @@ import random
 class A3CAgent(object):
 
   """An agent specifically for solving the mini-game maps."""
-  def __init__(self, training, ssize, force_focus_fire, writer, graph_loss, name='A3C/A3CAgent'):
+  def __init__(self, flags, ssize, writer, sess, name):
     self.name = name
-    self.training = training
+    self.training = flags.training
     self.ssize = ssize
     self.isize = len(U.useful_actions)
     self.custom_input_size = 1 + len(U.useful_actions)
     self.summary = []
-    self.graph_loss = graph_loss
-    self.force_focus_fire = force_focus_fire
+    self.summary_writer = writer
+    self.graph_loss = flags.use_tensorboard
+    self.force_focus_fire = flags.force_focus_fire
     self.killed = False
     self.lastValue = -1
     self.lastValueTarget = -1
     self.lastActionName = "None"
     self.lastActionProbs = "None"
-
-  def setup(self, sess, writer):
     self.sess = sess
-    self.summary_writer = writer
 
 
   def initialize(self):
@@ -268,7 +266,8 @@ class A3CAgent(object):
           minHealth = hp
           minDist = dist
           best_roach = roach
-      min_health_roach_location[i][best_roach.y * self.ssize + best_roach.x] = 1.0
+      if len(roaches) > 0:
+          min_health_roach_location[i][best_roach.y * self.ssize + best_roach.x] = 1.0
 
       reward = obs.reward
       # TODO: Here is where we can add pseudo-reward (e.g. for hitting a roach)

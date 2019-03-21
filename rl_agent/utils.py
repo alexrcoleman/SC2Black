@@ -137,3 +137,15 @@ def screen_channel():
     else:
       c += feat.scale
   return c
+
+def runningAverage(list, size):
+    cnt = 0
+    sum = 0
+    nlist = []
+    for i in range(len(list)):
+        sum += list[i]
+        if i >= size:
+            sum -= list[i-size]
+        if i+1 >= size:
+            nlist.append(sum/size)
+    return nlist
