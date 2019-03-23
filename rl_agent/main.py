@@ -29,13 +29,12 @@ flags.DEFINE_float("learning_rate", 2e-5, "Learning rate for training.")
 flags.DEFINE_float("discount", 0.99, "Discount rate for future rewards.")
 flags.DEFINE_integer("max_steps", int(1e6), "Total steps for training.")
 flags.DEFINE_integer("snapshot_step", int(1e3), "Step for snapshot.")
-flags.DEFINE_float("entropy_rate", .03, "entropy weight")
+flags.DEFINE_float("entropy_rate", .15, "entropy weight")
 flags.DEFINE_string("map", "DefeatRoaches", "Name of a map to use.")
 flags.DEFINE_bool("render", False, "Whether to render with pygame.")
 flags.DEFINE_integer("step_mul", 8, "Game steps per agent step.")
 flags.DEFINE_integer("max_agent_steps", 500, "Total agent steps.")
 flags.DEFINE_integer("parallel", 1, "How many instances to run in parallel.")
-flags.DEFINE_bool("save_replay", False, "Whether to save a replay at the end.")
 flags.DEFINE_bool("force_focus_fire", False, "Whether to force focus firing (i.e. all 'attack' actions will redirect to lowest health / closest roach)")
 flags.DEFINE_bool("use_tensorboard", True, "weather or not to use usetensorboard")
 flags.DEFINE_string("tensorboard_dir", None, "directory for tb")
@@ -114,10 +113,6 @@ def _main(unused_argv):
   for t in envs:
     t.join()
   summary_writer.close()
-
-  steps = min(MAX_AGENT_STEPS * FLAGS.step_mul, 1920)
-
-
 
 if __name__ == "__main__":
   app.run(_main)

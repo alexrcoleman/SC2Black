@@ -134,7 +134,7 @@ class A3CAgent(object):
       self.saver = tf.train.Saver(max_to_keep=100)
 
 
-  def step(self, obs):
+  def act(self, obs):
     screen = np.array(obs.observation['feature_screen'], dtype=np.float32)
     screen = np.expand_dims(U.preprocess_screen(screen), axis=0)
     info = np.zeros([1, self.isize], dtype=np.float32)
@@ -145,32 +145,31 @@ class A3CAgent(object):
             self.screen: screen,
             self.info: info,
             self.custom_inputs: custom_inputs,}
-    non_spatial_action, spatial_action, value = self.sess.run(
+    non_spatial_action_p, spatial_action_p, value = self.sess.run(
       [self.non_spatial_action, self.spatial_action, self.value],
       feed_dict=feed)
     self.lastValue = value
 
     # Select an action and a spatial target
-    non_spatial_action = non_spatial_action.ravel()
-    spatial_action = spatial_action.ravel()
+    non_spatial_action_p = non_spatial_action_p.ravel()
+    spatial_action_p = spatial_action_p.ravel()
     valid_actions = obs.observation['available_actions']
     valid_actions = U.compressActions(valid_actions)
 
 
     # Take the node highest with the most weight
     node_non_spatial_id = 0
-    if len(non_spatial_action[valid_actions]) > 0:
-        node_non_spatial_id = np.argmax(non_spatial_action[valid_actions])
-    node_spatial_id = np.argmax(spatial_action)
-
-    #if np.random.rand() < .1 and self.training:
-    #  node_non_spatial_id = np.random.choice(np.arange(len(non_spatial_action[valid_actions])))
-      #print("Randomly picking from ", valid_actions)
-      #print("uncompressed: ", obs.observation['available_actions'])
-      #print("Chose number ", node_non_spatial_id, " net = ", valid_actions[node_non_spatial_id], " real = ", U.useful_actions[valid_actions[node_non_spatial_id]])
-      #node_non_spatial_id = np.random.choice(np.arange(len(non_spatial_action[valid_actions])))#, p=non_spatial_action[valid_actions]/np.sum(non_spatial_action[valid_actions]))
-      #node_spatial_id = np.random.choice(spatial_action)
-      #node_spatial_id = np.random.choice(np.arange(len(spatial_action)))#, p=spatial_action)
+    node_spatial_id = 0
+    if len(valid_actions) > 0:
+      valid_action_p = non_spatial_action_p[valid_actions]+1e-12
+      valid_action_p = valid_action_p / np.sum(valid_action_p)
+      # node_non_spatial_id = np.random.choice(np.arange(len(valid_actions)), p=valid_action_p)
+      # node_spatial_id = np.random.choice(np.arange(len(spatial_action_p)), p=spatial_action_p)
+      node_non_spatial_id = np.argmax(valid_action_p)
+      node_spatial_id = np.argmax(spatial_action_p)
+      if np.random.rand() < .03 and self.training:
+        node_non_spatial_id = np.random.choice(np.arange(len(valid_actions)))
+        node_spatial_id = np.random.choice(np.arange(len(spatial_action_p)))
 
     # Map these into actual actions / location
     net_act_id = 0
@@ -178,7 +177,7 @@ class A3CAgent(object):
         net_act_id = valid_actions[node_non_spatial_id]
     act_id = U.useful_actions[net_act_id]
     self.lastActionName = actions.FUNCTIONS[act_id].name
-    self.lastActionProbs = non_spatial_action
+    self.lastActionProbs = non_spatial_action_p
     target = [int(node_spatial_id // self.ssize), int(node_spatial_id % self.ssize)]
 
     if self.force_focus_fire:

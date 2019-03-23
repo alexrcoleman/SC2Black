@@ -60,36 +60,34 @@ class Environment(threading.Thread):
               index = np.argwhere(timestep.observation.available_actions==2)
               timestep.observation.available_actions = np.delete(timestep.observation.available_actions, index)
 
-          last_net_act_id, act = self.agent.step(timestep)
+          last_net_act_id, act = self.agent.act(timestep)
 
           timestep = self.env.step([act])[0]
           ### HACKY FIX !!!
           timestep.observation.custom_inputs = np.concatenate([[norm_step],last_act_onehot], axis = 0)
 
           is_done = (num_frames >= self.max_frames) or timestep.last()
-          recorder = [last_timestep, last_net_act_id, act, timestep]
 
           local_counter = 0
           if FLAGS.training:
-              replay_buffer.append(recorder)
+              replay_buffer.append([last_timestep, last_net_act_id, act, timestep])
               if is_done or num_frames % Environment.UPDATE_STEPS == 0:
                   with Environment.LOCK:
                       Environment.counter += 1
                       local_counter = Environment.counter
                   learning_rate = FLAGS.learning_rate * (1 - 0.9 * local_counter / FLAGS.max_steps)
-                  entropy_rate = FLAGS.entropy_rate * (1 - 0.99 * local_counter/ FLAGS.max_steps)
+                  entropy_rate = FLAGS.entropy_rate * (1 - 0.99 * local_counter / FLAGS.max_steps)
                   self.agent.update(replay_buffer, FLAGS.discount, learning_rate, local_counter, entropy_rate)
                   replay_buffer = []
-
+                  if local_counter % FLAGS.snapshot_step == 1:
+                      self.agent.save_model('./snapshot/'+FLAGS.map, local_counter)
+                  if local_counter >= FLAGS.max_steps:
+                      break
           if is_done:
               score = timestep.observation["score_cumulative"][0]
               sum = tf.Summary()
               sum.value.add(tag='score',simple_value=score)
               with Environment.LOCK:
                   self.summary_writer.add_summary(sum, local_counter)
-              print('Your score is '+str(score)+'! counter is ' + str(local_counter))
-              if self.counter % FLAGS.snapshot_step == 1:
-                  self.agent.save_model(SNAPSHOT, counter)
-              if self.counter >= FLAGS.max_steps:
-                  break
+              print('counter '+str(local_counter)+' score: ' + str(score))
               break
