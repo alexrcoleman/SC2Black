@@ -22,8 +22,6 @@ class StatusGUI:
         self.agent_panels[i].update()
 
     def close(self):
-      for env in self.envs:
-        env.stop_signal = True
       self.root.destroy()
 
 class AgentPanel:
