@@ -15,7 +15,7 @@ class Brain:
         self.eps = .3
         self.flags = flags
         self.summary_writer = summary_writer
-        self.N_STEP_RETURN = 32
+        self.N_STEP_RETURN = 20
         self.GAMMA = self.flags.discount
         self.GAMMA_N = self.GAMMA**self.N_STEP_RETURN
         self.ssize = 64
@@ -80,12 +80,8 @@ class Brain:
         valid_non_spatial_action = np.zeros([1, len(U.useful_actions)], dtype=np.float32)
         non_spatial_action_selected = np.zeros(
             [1, len(U.useful_actions)], dtype=np.float32)
-        min_health_roach_location = np.zeros([1, self.ssize**2], dtype=np.float32)
         custom_inputs = np.expand_dims(
             np.array(obs.observation.custom_inputs, dtype=np.float32), axis=0)
-        best_roach = U.getLowestHealthRoach(obs)
-        if not best_roach is None:
-            min_health_roach_location[0][best_roach[0] * self.ssize + best_roach[1]] = 1.0
 
         act_id = action.function
         net_act_id = attributed_act_id
@@ -112,7 +108,6 @@ class Brain:
             self.spatial_action_selected: spatial_action_selected,
             self.valid_non_spatial_action: valid_non_spatial_action,
             self.non_spatial_action_selected: non_spatial_action_selected,
-            self.min_health_roach_location: min_health_roach_location,
         }
 
     def predict(self, feed):
@@ -186,8 +181,6 @@ class Brain:
                 tf.float32, [None, len(U.useful_actions)], name='non_spatial_action_selected')
             self.value_target = tf.placeholder(
                 tf.float32, [None], name='value_target')
-            self.min_health_roach_location = tf.placeholder(
-                tf.float32, [None, self.ssize**2], name='min_health_roach_location')
             self.entropy_rate = tf.placeholder(
                 tf.float32, None, name='entropy_rate')
 
@@ -215,12 +208,8 @@ class Brain:
             value_loss = self.getValueLoss(advantage)
             entropy = self.getEntropy(
                 self.non_spatial_action, self.spatial_action, self.valid_spatial_action)
-            # min_health_roach_loss = self.getMinRoachHealthLoss(self.min_health_roach_location, self.roach_prediction)
-            #min_health_roach_loss = tf.reduce_sum(tf.nn.softmax_cross_entropy_with_logits_v2(
-            #    logits=self.roach_prediction, labels=self.min_health_roach_location))
 
-            loss = tf.reduce_mean(policy_loss + value_loss * .1 +
-                                  min_health_roach_loss * 0 + entropy * self.entropy_rate)
+            loss = tf.reduce_mean(policy_loss + value_loss * .1 + entropy * self.entropy_rate)
 
             # Build the optimizer
             self.learning_rate = tf.placeholder(tf.float32, None, name='learning_rate')
@@ -242,8 +231,6 @@ class Brain:
                     'advantage', tf.reduce_mean(advantage)))
                 summary.append(tf.summary.scalar(
                     'loss', tf.reduce_mean(loss)))
-                summary.append(tf.summary.scalar(
-                    'min_roach_loss', tf.reduce_mean(min_health_roach_loss)))
                 self.summary_op = tf.summary.merge(summary)
             else:
                 self.summary_op = []
