@@ -9,10 +9,12 @@ import time
 
 class Brain:
     MIN_BATCH = 25
+    MIN_EPS = .0001
+    MAX_EPS = .2
     def __init__(self, flags, summary_writer):
         self.lr = flags.learning_rate
         self.er = flags.entropy_rate
-        self.eps = .3
+        self.eps = Brain.MAX_EPS
         self.flags = flags
         self.summary_writer = summary_writer
         self.N_STEP_RETURN = 20
@@ -42,18 +44,6 @@ class Brain:
 
     def stop(self):
         self.stop_signal = True
-
-    def getPolicyLoss(self, action_probability, advantage):
-        return -tf.log(action_probability + 1e-10) * tf.stop_gradient(advantage)
-
-    def getValueLoss(self, advantage):
-        return tf.square(advantage)
-
-    def getEntropy(self, policy, spatial_policy, valid_spatial):
-        return tf.reduce_sum(policy * tf.log(policy + 1e-10)) + tf.reduce_sum(spatial_policy * tf.log(spatial_policy + 1e-10))
-
-    def getMinRoachHealthLoss(self, roach_target, roach_prediction):
-        return tf.reduce_sum(tf.square(roach_target - roach_prediction))
 
     def getPredictFeedDict(self, obs):
         screen = np.array(obs.observation['feature_screen'], dtype=np.float32)
@@ -124,6 +114,8 @@ class Brain:
         if self.flags.use_tensorboard:
             with self.counter_lock:
                 self.eps = self.eps * .999
+                if self.eps < Brain.MIN_EPS:
+                    self.eps = Brain.MIN_EPS
                 self.training_counter = self.training_counter + 1
                 self.summary_writer.add_summary(summary, self.training_counter)
                 self.summary_writer.flush()
@@ -167,6 +159,18 @@ class Brain:
         batch_train_feed[self.value_target] = r
 
         self.train(batch_train_feed)
+
+    def getPolicyLoss(self, action_probability, advantage):
+        return -tf.log(action_probability + 1e-10) * tf.stop_gradient(advantage)
+
+    def getValueLoss(self, advantage):
+        return tf.square(advantage)
+
+    def getEntropy(self, policy, spatial_policy, valid_spatial):
+        return tf.reduce_sum(policy * tf.log(policy + 1e-10)) + tf.reduce_sum(spatial_policy * tf.log(spatial_policy + 1e-10))
+
+    def getMinRoachHealthLoss(self, roach_target, roach_prediction):
+        return tf.reduce_sum(tf.square(roach_target - roach_prediction))
 
     def build_model(self, dev):
         with tf.variable_scope('a3c') and tf.device(dev):
