@@ -21,46 +21,31 @@ class Environment(threading.Thread):
         self.agent = A3CAgent(flags, brain, 64, name)
         self.lastTime = None
 
-    def startBench(self):
-        self.lastTime = int(round(time.time() * 1000))
-    def bench(self, label):
-        millis = int(round(time.time() * 1000))
-        print(self.agent.name, label, millis - self.lastTime, "ms")
-        self.startBench()
     def run(self):
-
         # Sets up environment
-        with sc2_env.SC2Env(map_name=self.flags.map,
-                            agent_interface_format=agent_interface_format,
-                            step_mul=self.flags.step_mul,
-                            visualize=self.flags.render) as self.env:
+        with gym.make(flags.environment) as self.env:
             while not (self.stop_signal or self.brain.stop_signal):
                 self.run_game()
 
     def run_game(self):
         FLAGS = self.flags
         num_frames = 0
-        timestep = self.env.reset()[0]
-        last_net_act_id = 0
-        self.addInputs(timestep, num_frames, last_net_act_id)
+        action_id = 0
+        score = 0
+        observation = self.env.reset()
         while not (self.stop_signal or self.brain.stop_signal):
             time.sleep(.00001) # yield
             num_frames += 1
-            last_timestep = timestep
-
-            last_net_act_id, act = self.agent.act(timestep)
-
-            timestep = self.env.step([act])[0]
-            self.addInputs(timestep, num_frames, last_net_act_id)
-
-            is_done = (num_frames >= self.max_frames) or timestep.last()
-
+            last_observation = observation
+            action_id = self.agent.act(observation)
+            observation, reward, done, _ = self.env.step(action_id)
+            score += reward
+            is_done = (num_frames >= self.max_frames) or done
 
             if FLAGS.training:
-                self.agent.train(last_timestep, last_net_act_id, act, timestep)
+                self.agent.train(last_observation, reward, action_id, observation)
 
             if is_done:
-                score = timestep.observation["score_cumulative"][0]
                 sum = tf.Summary()
                 sum.value.add(tag='score', simple_value=score)
                 with Environment.LOCK:
@@ -70,13 +55,6 @@ class Environment(threading.Thread):
                 print('Game #' + str(local_games) + ' sample #' + str(self.brain.training_counter) + ' score: ' + str(score))
                 break
 
-    def addInputs(self, timestep, num_frames, last_net_act_id):
-        norm_step = num_frames / self.max_frames
-        last_act_onehot = np.zeros(
-            [len(U.useful_actions)], dtype=np.float32)
-        last_act_onehot[last_net_act_id] = 1
-        timestep.observation.custom_inputs = np.concatenate(
-            [[norm_step], last_act_onehot], axis=0)
 
     def stop(self):
         self.stop_signal = True

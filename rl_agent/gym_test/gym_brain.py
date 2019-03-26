@@ -44,8 +44,8 @@ class Brain:
     def stop(self):
         self.stop_signal = True
 
-    def getPredictFeedDict(self, env):
-        input = np.array(env.observation, dtype=np.float32)
+    def getPredictFeedDict(self, observation):
+        input = np.array(observation, dtype=np.float32)
         return {
             self.input: input,}
 
@@ -55,20 +55,17 @@ class Brain:
         feed_dict=feed)
         return policy, value
 
-    def getTrainFeedDict(self, env, action, attributed_act_id):
-        input = np.array(env.observation, dtype=float32)
+    def getTrainFeedDict(self, observation, reward, action_id):
+        input = np.array(observation, dtype=float32)
         value_target = np.zeros([1], dtype=np.float32)
-        value_target[0] = obs.reward
-
-        act_id = action.function
-        net_act_id = attributed_act_id
-        act_args = action.arguments
-
-
+        value_target[0] = reward
+        action_selected = np.zeros(
+            [1, self.output_shape[0]], dtype=np.float32)
+        action_selected[0, action_id] = 1
         return {
             self.input:input,
             self.value_target: value_target,
-            self
+            self.action_selected: action_selected,
         }
 
 
