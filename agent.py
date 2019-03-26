@@ -56,6 +56,7 @@ class A3CAgent(object):
         net_act_id = 0
         if len(valid_actions) > 0:
             net_act_id = valid_actions[node_non_spatial_id]
+
         act_id = U.useful_actions[net_act_id]
         target = [int(node_spatial_id // self.ssize),
                   int(node_spatial_id % self.ssize)]
@@ -97,7 +98,7 @@ class A3CAgent(object):
             return tf, pf, self.R, smask
 
         # print("Self memory: ", len(self.memory), self.R)
-        self.R = (self.R + timestep.observation.rewardMod * brain.GAMMA_N) / brain.GAMMA
+        self.R = (self.R + timestep.reward * brain.GAMMA_N) / brain.GAMMA
 
         self.memory.append((brain.getTrainFeedDict(timestep, act, net_act_id), brain.getPredictFeedDict(
             next_timestep), 0 if next_timestep.last() else 1))

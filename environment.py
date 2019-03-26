@@ -21,8 +21,6 @@ class Environment(threading.Thread):
         self.stop_signal = False
         self.agent = A3CAgent(flags, brain, 64, name)
         self.lastTime = None
-        self.previousHealth = None
-        self.currentHealth = None
 
     def startBench(self):
         self.lastTime = int(round(time.time() * 1000))
@@ -48,7 +46,6 @@ class Environment(threading.Thread):
     def run_game(self):
         FLAGS = self.flags
         num_frames = 0
-        self.previousHealth = None
         timestep = self.env.reset()[0]
         last_net_act_id = 0
         self.addInputs(timestep, num_frames, last_net_act_id)
@@ -86,8 +83,9 @@ class Environment(threading.Thread):
                 sum.value.add(tag='score', simple_value=score)
                 with Environment.LOCK:
                     Environment.games = Environment.games + 1
-                    self.summary_writer.add_summary(sum, Environment.games)
-                    print('Game #' + str(Environment.games) + ' score: ' + str(score))
+                    local_games = Environment.games
+                self.summary_writer.add_summary(sum, local_games)
+                print('Game #' + str(local_games) + ' sample #' + str(self.brain.training_counter) + ' score: ' + str(score))
                 break
 
     def addInputs(self, timestep, num_frames, last_net_act_id):
@@ -97,15 +95,6 @@ class Environment(threading.Thread):
         last_act_onehot[last_net_act_id] = 1
         timestep.observation.custom_inputs = np.concatenate(
             [[norm_step], last_act_onehot], axis=0)
-        if(self.previousHealth != None):
-            self.CurrentHealth = U.getMarineHealthSum(timestep)
-            healthLoss = self.previousHealth - self.CurrentHealth
-            print(str(timestep.reward))
-            timestep.observation.rewardMod = timestep.reward - healthLoss * (0.25)
-        else:
-            timestep.observation.rewardMod = timestep.reward
-        self.previousHealth = U.getMarineHealthSum(timestep)
-        print("Total Marine Health: " + str(self.previousHealth))
 
     def stop(self):
         self.stop_signal = True

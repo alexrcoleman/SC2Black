@@ -78,15 +78,6 @@ def getDangerousMarineLoc(obs):
         best_marine = [best_marine.y, best_marine.x]
     return best_marine
 
-def getMarineHealthSum(obs):
-    sumHealth = 0
-    feature_marines = [
-          unit for unit in obs.observation.feature_units if unit.alliance == features.PlayerRelative.SELF]   
-    for marine in feature_marines:
-        hp = marine.health_ratio / 255
-        sumHealth = sumHealth + hp
-    return sumHealth
-        
 def make_batch(feeds):
     feed = {}
     for key in feeds[0]:
