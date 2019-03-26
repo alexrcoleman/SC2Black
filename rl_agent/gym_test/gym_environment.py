@@ -12,7 +12,7 @@ class Environment(threading.Thread):
     games = 0
     LOCK = threading.Lock()
 
-    def __init__(self, flags, brain, max_frames, summary_writer, name):
+    def __init__(self, flags, brain, summary_writer, name):
         threading.Thread.__init__(self)
         self.flags = flags
         self.brain = brain

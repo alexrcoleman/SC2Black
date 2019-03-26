@@ -2,7 +2,6 @@ import tensorflow as tf
 import tensorflow.contrib.layers as layers
 
 from pysc2.lib import actions
-import utils as U
 import numpy as np
 import threading
 import time
@@ -137,7 +136,7 @@ class Brain:
         with tf.variable_scope('a3c') and tf.device(dev):
             # Set targets and masks
             self.action_selected = tf.placeholder(
-                tf.float32, [self.input_shape], name='action_selected'
+                tf.float32, [self.output_shape[0]], name='action_selected')
             self.value_target = tf.placeholder(
                 tf.float32, [None], name='value_target')
             self.entropy_rate = tf.placeholder(
@@ -186,20 +185,20 @@ class Brain:
     def build_net(self, dev):
         with tf.variable_scope('a3c') and tf.device(dev):
             self.input = tf.placeholder(
-                tf.float32, [None, self.input_shape], name='input')
-            )
+                tf.float32, [None, self.input_shape[0]], name='input')
 
-            fc = layers.fully_connected(input, axis=1),
-                                             num_outputs=256,
-                                             activation_fn=tf.nn.relu,
-                                             scope='info_fc')
+
+            fc = layers.fully_connected(self.input,
+                                         num_outputs=256,
+                                         activation_fn=tf.nn.relu,
+                                         scope='info_fc')
 
             fc = layers.fully_connected(fc,
                                          num_outputs=256,
                                          activation_fn=tf.nn.relu,
                                          scope='feat_fc')
             self.action = layers.fully_connected(fc,
-                                                        num_outputs=self.output_shape,
+                                                        num_outputs=self.output_shape[0],
                                                         activation_fn=tf.nn.softmax,
                                                         scope='non_spatial_action')
 
