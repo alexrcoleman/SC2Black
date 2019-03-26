@@ -7,7 +7,7 @@ sys.path.append('../')
 import gym
 import numpy as np
 from absl import flags
-from brain import Brain
+from gym_brain import Brain
 from optimizer import Optimizer
 
 FLAGS = flags.FLAGS
@@ -15,6 +15,7 @@ flags.DEFINE_string('environment','CartPole-v0','Which gym environment to run')
 
 def run_gym_test():
     summary_writer = createSummaryWriter()
+    brain = Brain(FLAGS, summary_writer, )
 
 def createSummaryWriter():
     TBDIR = ''
