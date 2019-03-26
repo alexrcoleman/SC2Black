@@ -83,8 +83,9 @@ class Environment(threading.Thread):
                 sum.value.add(tag='score', simple_value=score)
                 with Environment.LOCK:
                     Environment.games = Environment.games + 1
-                    self.summary_writer.add_summary(sum, Environment.games)
-                    print('Game #' + str(Environment.games) + ' score: ' + str(score))
+                    local_games = Environment.games
+                self.summary_writer.add_summary(sum, local_games)
+                print('Game #' + str(local_games) + ' sample #' + str(self.brain.training_counter) + ' score: ' + str(score))
                 break
 
     def addInputs(self, timestep, num_frames, last_net_act_id):

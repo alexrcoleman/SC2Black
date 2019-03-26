@@ -56,6 +56,7 @@ class A3CAgent(object):
         net_act_id = 0
         if len(valid_actions) > 0:
             net_act_id = valid_actions[node_non_spatial_id]
+
         act_id = U.useful_actions[net_act_id]
         target = [int(node_spatial_id // self.ssize),
                   int(node_spatial_id % self.ssize)]

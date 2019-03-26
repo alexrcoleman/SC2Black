@@ -10,14 +10,14 @@ import time
 class Brain:
     MIN_BATCH = 25
     MIN_EPS = .0001
-    MAX_EPS = .2
+    MAX_EPS = .001
     def __init__(self, flags, summary_writer):
         self.lr = flags.learning_rate
         self.er = flags.entropy_rate
         self.eps = Brain.MAX_EPS
         self.flags = flags
         self.summary_writer = summary_writer
-        self.N_STEP_RETURN = 20
+        self.N_STEP_RETURN = 10
         self.GAMMA = self.flags.discount
         self.GAMMA_N = self.GAMMA**self.N_STEP_RETURN
         self.ssize = 64
@@ -111,21 +111,20 @@ class Brain:
         feed[self.entropy_rate] = self.er * (1 - 0.9 * self.training_counter / self.flags.max_train_steps)
 
         _, summary = self.session.run([self.train_op, self.summary_op], feed_dict=feed)
+        with self.counter_lock:
+            self.eps = max(self.eps * .999, Brain.MIN_EPS)
+            local_counter = self.training_counter
+            self.training_counter = self.training_counter + 1
         if self.flags.use_tensorboard:
-            with self.counter_lock:
-                self.eps = self.eps * .999
-                if self.eps < Brain.MIN_EPS:
-                    self.eps = Brain.MIN_EPS
-                self.training_counter = self.training_counter + 1
-                self.summary_writer.add_summary(summary, self.training_counter)
-                self.summary_writer.flush()
-                if self.training_counter % self.flags.snapshot_step == 1 or self.training_counter >= self.flags.max_train_steps:
-                    self.save_model('./snapshot/'+self.flags.map, self.training_counter)
-                    print("Snapshot of model saved at", self.training_counter)
+            self.summary_writer.add_summary(summary, local_counter)
+            self.summary_writer.flush()
+            if local_counter % self.flags.snapshot_step == 1 or local_counter >= self.flags.max_train_steps:
+                self.save_model('./snapshot/'+self.flags.map, local_counter)
+                print("Snapshot of model saved at", local_counter)
 
-                if self.training_counter >= self.flags.max_train_steps:
-                    print("Reached step %d, training complete." % self.flags.max_train_steps)
-                    self.stop()
+            if local_counter >= self.flags.max_train_steps:
+                print("Reached step %d, training complete." % local_counter)
+                self.stop()
 
     def add_train(self, train_feed, predict_feed, t_mask):
         with self.lock_queue:
@@ -142,8 +141,8 @@ class Brain:
             return
 
         with self.lock_queue:
-            if len(self.train_queue[0]) < Brain.MIN_BATCH:	# more thread could have passed without lock
-                return 									# we can't yield inside lock
+            if len(self.train_queue[0]) < Brain.MIN_BATCH:
+                return
 
             tfs, pfs, t_mask = self.train_queue
             self.train_queue = [ [], [], [] ]
@@ -219,7 +218,7 @@ class Brain:
             self.learning_rate = tf.placeholder(tf.float32, None, name='learning_rate')
             opt = tf.train.AdamOptimizer(self.learning_rate)
             grads, vars = zip(*opt.compute_gradients(loss))
-            grads, glob_norm = tf.clip_by_global_norm(grads, 28.0)
+            grads, glob_norm = tf.clip_by_global_norm(grads, 50.0)
             self.train_op = opt.apply_gradients(zip(grads, vars))
             if self.flags.use_tensorboard:
                 summary = []
