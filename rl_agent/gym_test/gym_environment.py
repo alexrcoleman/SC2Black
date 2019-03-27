@@ -1,4 +1,4 @@
-from agent import A3CAgent
+from gym_agent import A3CAgent
 from pysc2.env import sc2_env
 from pysc2.lib import actions
 import numpy as np
@@ -6,7 +6,7 @@ import threading
 import utils as U
 import tensorflow as tf
 import time
-
+import gym
 
 class Environment(threading.Thread):
     games = 0
@@ -23,10 +23,9 @@ class Environment(threading.Thread):
 
     def run(self):
         # Sets up environment
-        with gym.make(flags.environment) as self.env:
-            while not (self.stop_signal or self.brain.stop_signal):
-                self.run_game()
-
+        self.env = gym.make(self.flags.environment)
+        while not (self.stop_signal or self.brain.stop_signal):
+            self.run_game()
     def run_game(self):
         FLAGS = self.flags
         num_frames = 0
@@ -37,15 +36,16 @@ class Environment(threading.Thread):
             time.sleep(.00001) # yield
             num_frames += 1
             last_observation = observation
+            if self.agent.name == "A3CAgent_0":
+                self.env.render()
             action_id = self.agent.act(observation)
             observation, reward, done, _ = self.env.step(action_id)
             score += reward
-            is_done = (num_frames >= self.max_frames) or done
 
             if FLAGS.training:
-                self.agent.train(last_observation, reward, action_id, observation)
+                self.agent.train(last_observation, reward, action_id, observation, done)
 
-            if is_done:
+            if done:
                 sum = tf.Summary()
                 sum.value.add(tag='score', simple_value=score)
                 with Environment.LOCK:

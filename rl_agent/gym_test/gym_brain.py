@@ -5,18 +5,15 @@ from pysc2.lib import actions
 import numpy as np
 import threading
 import time
-
+import utils as U
 class Brain:
-    MIN_BATCH = 25
-    MIN_EPS = .0001
-    MAX_EPS = .2
+    MIN_BATCH = 32
     def __init__(self, flags, summary_writer, input_shape, output_shape):
         self.lr = flags.learning_rate
         self.er = flags.entropy_rate
-        self.eps = Brain.MAX_EPS
         self.flags = flags
         self.summary_writer = summary_writer
-        self.N_STEP_RETURN = 20
+        self.N_STEP_RETURN = 8
         self.GAMMA = self.flags.discount
         self.GAMMA_N = self.GAMMA**self.N_STEP_RETURN
         self.stop_signal = False
@@ -44,18 +41,18 @@ class Brain:
         self.stop_signal = True
 
     def getPredictFeedDict(self, observation):
-        input = np.array(observation, dtype=np.float32)
+        input = np.expand_dims(np.array(observation, dtype=np.float32), axis=0)
         return {
             self.input: input,}
 
     def predict(self, feed):
         policy, value = self.session.run(
-        [self.policy, self.value],
+        [self.action, self.value],
         feed_dict=feed)
         return policy, value
 
     def getTrainFeedDict(self, observation, reward, action_id):
-        input = np.array(observation, dtype=float32)
+        input = np.expand_dims(np.array(observation, dtype=np.float32), axis=0)
         value_target = np.zeros([1], dtype=np.float32)
         value_target[0] = reward
         action_selected = np.zeros(
@@ -69,25 +66,15 @@ class Brain:
 
 
     def train(self, feed):
-        feed[self.learning_rate] = self.lr * (1 - 0.9 * self.training_counter / self.flags.max_train_steps)
-        feed[self.entropy_rate] = self.er * (1 - 0.9 * self.training_counter / self.flags.max_train_steps)
+        feed[self.learning_rate] = self.lr
+        feed[self.entropy_rate] = self.er
 
         _, summary = self.session.run([self.train_op, self.summary_op], feed_dict=feed)
         if self.flags.use_tensorboard:
             with self.counter_lock:
-                self.eps = self.eps * .999
-                if self.eps < Brain.MIN_EPS:
-                    self.eps = Brain.MIN_EPS
                 self.training_counter = self.training_counter + 1
                 self.summary_writer.add_summary(summary, self.training_counter)
                 self.summary_writer.flush()
-                if self.training_counter % self.flags.snapshot_step == 1 or self.training_counter >= self.flags.max_train_steps:
-                    self.save_model('./snapshot/'+self.flags.map, self.training_counter)
-                    print("Snapshot of model saved at", self.training_counter)
-
-                if self.training_counter >= self.flags.max_train_steps:
-                    print("Reached step %d, training complete." % self.flags.max_train_steps)
-                    self.stop()
 
     def add_train(self, train_feed, predict_feed, t_mask):
         with self.lock_queue:
@@ -112,7 +99,7 @@ class Brain:
 
         if len(tfs) > 5*Brain.MIN_BATCH: print("Optimizer alert! Minimizing batch of %d" % len(tfs))
         batch_predict_feed = U.make_batch(pfs)
-        _, _, v = self.predict(batch_predict_feed)
+        _, v = self.predict(batch_predict_feed)
 
         batch_train_feed = U.make_batch(tfs)
 
@@ -136,7 +123,7 @@ class Brain:
         with tf.variable_scope('a3c') and tf.device(dev):
             # Set targets and masks
             self.action_selected = tf.placeholder(
-                tf.float32, [self.output_shape[0]], name='action_selected')
+                tf.float32, [None, self.output_shape[0]], name='action_selected')
             self.value_target = tf.placeholder(
                 tf.float32, [None], name='value_target')
             self.entropy_rate = tf.placeholder(
@@ -155,13 +142,13 @@ class Brain:
             value_loss = self.getValueLoss(advantage)
             entropy = self.getEntropy(self.action)
 
-            loss = tf.reduce_mean(policy_loss + value_loss * .1 + entropy * self.entropy_rate)
+            loss = tf.reduce_mean(policy_loss + value_loss * .5 + entropy * self.entropy_rate)
 
             # Build the optimizer
             self.learning_rate = tf.placeholder(tf.float32, None, name='learning_rate')
             opt = tf.train.AdamOptimizer(self.learning_rate)
             grads, vars = zip(*opt.compute_gradients(loss))
-            grads, glob_norm = tf.clip_by_global_norm(grads, 28.0)
+            grads, glob_norm = tf.clip_by_global_norm(grads, 280.0)
             self.train_op = opt.apply_gradients(zip(grads, vars))
             if self.flags.use_tensorboard:
                 summary = []
@@ -189,14 +176,10 @@ class Brain:
 
 
             fc = layers.fully_connected(self.input,
-                                         num_outputs=256,
+                                         num_outputs=16,
                                          activation_fn=tf.nn.relu,
                                          scope='info_fc')
 
-            fc = layers.fully_connected(fc,
-                                         num_outputs=256,
-                                         activation_fn=tf.nn.relu,
-                                         scope='feat_fc')
             self.action = layers.fully_connected(fc,
                                                         num_outputs=self.output_shape[0],
                                                         activation_fn=tf.nn.softmax,

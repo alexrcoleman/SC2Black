@@ -11,6 +11,10 @@ import utils as U
 import random
 
 
+frames = 0
+EPS_START = 0.4
+EPS_STOP = .15
+EPS_STEPS = 75000
 class A3CAgent(object):
     def __init__(self, flags, brain, ssize, name):
         self.name = name
@@ -23,14 +27,20 @@ class A3CAgent(object):
         self.R = 0
         self.memory = []
 
+    def getEpsilon(self):
+        if(frames >= EPS_STEPS):
+            return EPS_STOP
+        else:
+            return EPS_START + frames * (EPS_STOP - EPS_START) / EPS_STEPS	# linearly interpolate
     def act(self, observation):
+        global frames; frames = frames + 1
         feed = self.brain.getPredictFeedDict(observation)
         action, value = self.brain.predict(feed)
-
+        action = action.ravel()
         # Take the node highest with the most weight
-        action_id = 0
-        action_id = np.argmax(action)
-        if np.random.rand() < self.brain.eps and self.flags.training:
+        # action_id = np.argmax(action)
+        action_id = np.random.choice(len(action), p=action)
+        if np.random.rand() < self.getEpsilon() and self.flags.training:
             action_id = np.random.choice(
                 np.arange(len(action)))
 
@@ -40,7 +50,7 @@ class A3CAgent(object):
         return action_id
 
     # train_feed, p_feed, smask
-    def train(self, last_observation, reward, act_id, observation, done):
+    def train(self, last_observation, reward, action_id, observation, done):
         brain = self.brain
         def get_sample(memory):
             tf, _, _ = memory[0]
@@ -51,12 +61,12 @@ class A3CAgent(object):
         # print("Self memory: ", len(self.memory), self.R)
         self.R = (self.R + reward * brain.GAMMA_N) / brain.GAMMA
 
-        self.memory.append((brain.getTrainFeedDict(timestep, act, net_act_id), brain.getPredictFeedDict(
-            next_timestep), 0 if done else 1))
+        self.memory.append((brain.getTrainFeedDict(last_observation, reward, action_id), brain.getPredictFeedDict(
+            observation), 0 if done else 1))
 
         # in case the game ended in < N steps (shouldn't happen)
-        if done:
-            self.R = self.R / brain.GAMMA**(brain.N_STEP_RETURN-len(self.memory))
+        #if done:
+        #    self.R = self.R / brain.GAMMA**(brain.N_STEP_RETURN-len(self.memory))
         while len(self.memory) >= brain.N_STEP_RETURN or (done and len(self.memory) > 0):
             tf, pf, r, smask = get_sample(self.memory)
             self.R = self.R - tf[brain.value_target][0]

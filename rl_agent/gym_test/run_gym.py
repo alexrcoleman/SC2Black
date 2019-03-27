@@ -14,13 +14,17 @@ import datetime
 import gym_statusgui
 import tensorflow as tf
 import time
+from tkinter import Tk
+import statusgui
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string('environment','CartPole-v0','Which gym environment to run')
 flags.DEFINE_integer("parallel", 1, "How many instances to run in parallel.")
-flags.DEFINE_float("learning_rate", 7e-5, "Learning rate for training.")
+flags.DEFINE_bool("training", True, "Whether to train agents.")
+flags.DEFINE_float("learning_rate", 5e-3, "Learning rate for training.")
 flags.DEFINE_float("discount", 0.99, "Discount rate for future rewards.")
-flags.DEFINE_float("entropy_rate", .15, "entropy weight")
+flags.DEFINE_integer("snapshot_step", int(5e3), "Step for snapshot.")
+flags.DEFINE_float("entropy_rate", .01, "entropy weight")
 flags.DEFINE_bool("use_tensorboard", True,
                   "whether or not to use usetensorboard")
 FLAGS(sys.argv)
@@ -45,7 +49,6 @@ def run_gym_test():
     for e in envs:
         e.daemon = True
         e.start()
-        time.sleep(5)
     print("All threads started")
     createGUI(envs)
     print("Stopping threads")
