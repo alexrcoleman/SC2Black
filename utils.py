@@ -14,7 +14,7 @@ _SCREEN_SELECTED = features.SCREEN_FEATURES.selected.index
 useful_screens = [
     # 4, # player_id
     5,  # player_relative
-    # 7, # selected
+    7, # selected
     # 8, # unit_hit_points
     9,  # unit_hit_points_ratio
     # 14, # unit_density
@@ -110,7 +110,7 @@ def getLowestHealthRoach(obs):
     return best_roach
 
 
-use_coords = True
+use_coords = False
 def preprocess_screen(screen):
     layers = []
     for i in useful_screens:

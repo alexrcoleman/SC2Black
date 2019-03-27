@@ -108,7 +108,7 @@ class Brain:
 
     def train(self, feed):
         feed[self.learning_rate] = self.lr * (1 - 0.9 * self.training_counter / self.flags.max_train_steps)
-        feed[self.entropy_rate] = self.er * (1 - 0.9 * self.training_counter / self.flags.max_train_steps)
+        feed[self.entropy_rate] = self.er * (1 - 0.5 * self.training_counter / self.flags.max_train_steps)
 
         _, summary = self.session.run([self.train_op, self.summary_op], feed_dict=feed)
         with self.counter_lock:
@@ -166,10 +166,10 @@ class Brain:
         return tf.square(advantage)
 
     def getEntropy(self, policy, spatial_policy, valid_spatial):
-        return tf.reduce_sum(policy * tf.log(policy + 1e-10)) + tf.reduce_sum(spatial_policy * tf.log(spatial_policy + 1e-10))
+        return tf.reduce_sum(policy * tf.log(policy + 1e-10), axis=1) + tf.reduce_sum(spatial_policy * tf.log(spatial_policy + 1e-10), axis=1)
 
     def getMinRoachHealthLoss(self, roach_target, roach_prediction):
-        return tf.reduce_sum(tf.square(roach_target - roach_prediction))
+        return tf.reduce_sum(tf.square(roach_target - roach_prediction), axis=1)
 
     def build_model(self, dev):
         with tf.variable_scope('a3c') and tf.device(dev):
@@ -191,15 +191,15 @@ class Brain:
             # the set of valid actions. The probability of an action is the probability the policy chooses
             # divided by the probability of a valid action
             valid_non_spatial_action_prob = tf.reduce_sum(
-                self.valid_non_spatial_action * self.non_spatial_action, axis=1)
+                self.valid_non_spatial_action * self.non_spatial_action+1e-10, axis=1)
             non_spatial_action_prob = tf.reduce_sum(
-                self.non_spatial_action_selected * self.non_spatial_action, axis=1) / valid_non_spatial_action_prob
+                self.non_spatial_action_selected * self.non_spatial_action+1e-10, axis=1) / valid_non_spatial_action_prob
 
             # Here we compute the probability of the spatial action. If the action selected was non spactial,
             # the probability will be one.
             # TODO: Make this use vectorized things (using a constant "valid_spatial_action" seems fishy to me, but maybe it's fine)
             spatial_action_prob = (self.valid_spatial_action * tf.reduce_sum(
-                self.spatial_action * self.spatial_action_selected, axis=1)) + (1.0 - self.valid_spatial_action)
+                self.spatial_action * self.spatial_action_selected, axis=1)) + (1.0 - self.valid_spatial_action)+1e-10
 
             # The probability of the action will be the the product of the non spatial and the spatial prob
             action_probability = non_spatial_action_prob * spatial_action_prob
@@ -212,7 +212,7 @@ class Brain:
             entropy = self.getEntropy(
                 self.non_spatial_action, self.spatial_action, self.valid_spatial_action)
 
-            loss = tf.reduce_mean(policy_loss + value_loss * .25 + entropy * self.entropy_rate)
+            loss = tf.reduce_mean(policy_loss + value_loss * .5 + entropy * self.entropy_rate)
 
             # Build the optimizer
             self.learning_rate = tf.placeholder(tf.float32, None, name='learning_rate')
@@ -264,7 +264,7 @@ class Brain:
                                    activation_fn=tf.nn.relu)
 
             info_fc = layers.fully_connected(tf.concat([self.info, self.custom_inputs], axis=1),
-                                             num_outputs=256,
+                                             num_outputs=64,
                                              activation_fn=tf.nn.relu,
                                              scope='info_fc')
 

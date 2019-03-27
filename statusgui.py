@@ -5,7 +5,7 @@ class StatusGUI:
     def __init__(self, root, envs):
       self.root = root
       self.envs = envs
-      self.note = Notebook(root, width= 400, height =400)
+      self.note = Notebook(root, width= 450, height =270)
       self.note.grid()
       root.title("SC2 RL Status")
 
@@ -46,5 +46,5 @@ class AgentPanel:
 
   def update(self):
     self.value_text.set(self.env.agent.lastValue)
-    self.action_text.set(self.env.agent.lastActionName)
-    self.actions_probs_text.set(self.env.agent.lastActionProbs)
+    self.action_text.set(self.env.agent.lastActionName + " @ " + str(self.env.agent.lastLocation))
+    self.actions_probs_text.set(str(self.env.agent.lastActionProbs) + "\n" + str(self.env.agent.last_spatial))

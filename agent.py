@@ -20,8 +20,10 @@ class A3CAgent(object):
         self.isize = len(U.useful_actions)
         self.lastValue = -1
         self.lastValueTarget = -1
+        self.lastLocation = [-1,-1]
         self.lastActionName = "None"
         self.lastActionProbs = "None"
+        self.last_spatial = "None"
         self.R = 0
         self.memory = []
 
@@ -31,6 +33,7 @@ class A3CAgent(object):
 
         # Select an action and a spatial target
         non_spatial_action_p = non_spatial_action_p.ravel()
+        old = spatial_action_p
         spatial_action_p = spatial_action_p.ravel()
         valid_actions = obs.observation['available_actions']
         valid_actions = U.compressActions(valid_actions)
@@ -51,7 +54,7 @@ class A3CAgent(object):
             if np.random.rand() < self.brain.eps and self.flags.training:
                 node_spatial_id = np.random.choice(
                     np.arange(len(spatial_action_p)))
-
+                    
         # Map these into actual actions / location
         net_act_id = 0
         if len(valid_actions) > 0:
@@ -84,8 +87,10 @@ class A3CAgent(object):
 
         # Update status for GUI
         self.lastValue = value
+        self.lastLocation = target
         self.lastActionName = actions.FUNCTIONS[act_id].name
         self.lastActionProbs = non_spatial_action_p
+        self.last_spatial = spatial_action_p
         return net_act_id, actions.FunctionCall(act_id, act_args)
 
     # train_feed, p_feed, smask
