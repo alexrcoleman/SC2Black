@@ -133,7 +133,7 @@ class Brain:
             # the set of valid actions. The probability of an action is the probability the policy chooses
             # divided by the probability of a valid action
             action_probability = tf.reduce_sum(
-                self.action_selected * self.action)
+                self.action_selected * self.action, axis=1)
 
             # The advantage function, which will represent how much better this action was than what was expected from this state
             advantage = self.value_target - self.value
@@ -148,7 +148,7 @@ class Brain:
             self.learning_rate = tf.placeholder(tf.float32, None, name='learning_rate')
             opt = tf.train.AdamOptimizer(self.learning_rate)
             grads, vars = zip(*opt.compute_gradients(loss))
-            grads, glob_norm = tf.clip_by_global_norm(grads, 280.0)
+            grads, glob_norm = tf.clip_by_global_norm(grads, 200.0)
             self.train_op = opt.apply_gradients(zip(grads, vars))
             if self.flags.use_tensorboard:
                 summary = []

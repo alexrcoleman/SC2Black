@@ -27,7 +27,7 @@ flags.DEFINE_float("learning_rate", 7e-5, "Learning rate for training.")
 flags.DEFINE_float("discount", 0.99, "Discount rate for future rewards.")
 flags.DEFINE_integer("max_train_steps", int(1e6), "Total steps for training.")
 flags.DEFINE_integer("snapshot_step", int(5e3), "Step for snapshot.")
-flags.DEFINE_float("entropy_rate", .15, "entropy weight")
+flags.DEFINE_float("entropy_rate", .1, "entropy weight")
 flags.DEFINE_string("map", "DefeatRoaches", "Name of a map to use.")
 flags.DEFINE_bool("render", False, "Whether to render with pygame.")
 flags.DEFINE_integer("step_mul", 8, "Game steps per agent step.")
@@ -66,7 +66,7 @@ def _main(unused_argv):
     for e in envs:
         e.daemon = True
         e.start()
-        time.sleep(5)
+        time.sleep(6)
     print("All threads started")
     createGUI(envs)
     print("Stopping threads")

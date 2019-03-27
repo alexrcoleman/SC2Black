@@ -9,7 +9,7 @@ from pysc2.lib import actions
 
 import utils as U
 import random
-
+import copy
 
 class A3CAgent(object):
     def __init__(self, flags, brain, ssize, name):
@@ -95,7 +95,7 @@ class A3CAgent(object):
             tf, _, _ = memory[0]
             _, pf, smask = memory[-1]
             memory.pop(0)
-            return tf, pf, self.R, smask
+            return tf, copy.copy(pf), self.R, smask
 
         # print("Self memory: ", len(self.memory), self.R)
         self.R = (self.R + timestep.reward * brain.GAMMA_N) / brain.GAMMA

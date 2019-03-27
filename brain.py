@@ -9,8 +9,8 @@ import time
 
 class Brain:
     MIN_BATCH = 25
-    MIN_EPS = .0001
-    MAX_EPS = .001
+    MIN_EPS = .01
+    MAX_EPS = .2
     def __init__(self, flags, summary_writer):
         self.lr = flags.learning_rate
         self.er = flags.entropy_rate
@@ -191,15 +191,15 @@ class Brain:
             # the set of valid actions. The probability of an action is the probability the policy chooses
             # divided by the probability of a valid action
             valid_non_spatial_action_prob = tf.reduce_sum(
-                self.valid_non_spatial_action * self.non_spatial_action)
+                self.valid_non_spatial_action * self.non_spatial_action, axis=1)
             non_spatial_action_prob = tf.reduce_sum(
-                self.non_spatial_action_selected * self.non_spatial_action) / valid_non_spatial_action_prob
+                self.non_spatial_action_selected * self.non_spatial_action, axis=1) / valid_non_spatial_action_prob
 
             # Here we compute the probability of the spatial action. If the action selected was non spactial,
             # the probability will be one.
             # TODO: Make this use vectorized things (using a constant "valid_spatial_action" seems fishy to me, but maybe it's fine)
             spatial_action_prob = (self.valid_spatial_action * tf.reduce_sum(
-                self.spatial_action * self.spatial_action_selected)) + (1.0 - self.valid_spatial_action)
+                self.spatial_action * self.spatial_action_selected, axis=1)) + (1.0 - self.valid_spatial_action)
 
             # The probability of the action will be the the product of the non spatial and the spatial prob
             action_probability = non_spatial_action_prob * spatial_action_prob
@@ -212,7 +212,7 @@ class Brain:
             entropy = self.getEntropy(
                 self.non_spatial_action, self.spatial_action, self.valid_spatial_action)
 
-            loss = tf.reduce_mean(policy_loss + value_loss * .1 + entropy * self.entropy_rate)
+            loss = tf.reduce_mean(policy_loss + value_loss * .25 + entropy * self.entropy_rate)
 
             # Build the optimizer
             self.learning_rate = tf.placeholder(tf.float32, None, name='learning_rate')
