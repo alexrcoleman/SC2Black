@@ -15,7 +15,7 @@ import gym_statusgui
 import tensorflow as tf
 import time
 from tkinter import Tk
-import statusgui
+import gym_statusgui
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string('environment','CartPole-v0','Which gym environment to run')
@@ -34,7 +34,7 @@ def run_gym_test():
     env = gym.make(FLAGS.environment)
     input_shape = env.observation_space.shape
     # (TODO) fix this to not be constant
-    output_shape = (2,)
+    output_shape = (env.action_space.n,)
 
     env.close()
     brain = Brain(FLAGS, summary_writer,input_shape, output_shape)
@@ -72,7 +72,7 @@ def createSummaryWriter():
 
 def createGUI(envs):
     root = Tk()
-    my_gui = statusgui.StatusGUI(root, envs)
+    my_gui = gym_statusgui.StatusGUI(root, envs)
 
     def updGUI():
         my_gui.update()

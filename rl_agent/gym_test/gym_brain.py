@@ -41,7 +41,7 @@ class Brain:
         self.stop_signal = True
 
     def getPredictFeedDict(self, observation):
-        input = np.expand_dims(np.array(observation, dtype=np.float32), axis=0)
+        input = np.expand_dims(np.array(Brain.preprocess(observation), dtype=np.float32), axis=0)
         return {
             self.input: input,}
 
@@ -51,8 +51,21 @@ class Brain:
         feed_dict=feed)
         return policy, value
 
+
+    def preprocess(obs):
+        if len(obs.shape) == 1:
+            return obs
+        # Crop everything outside the play area, reduce the image size,
+        # and convert it to black and white.
+        cropped = obs[34:194, :, :]
+        reduced = cropped[0:-1:2, 0:-1:2]
+        grayscale = np.sum(reduced, axis=2)
+        bw = np.zeros(grayscale.shape)
+        bw[grayscale != 233] = 1
+        return np.expand_dims(bw, axis=2)
+
     def getTrainFeedDict(self, observation, reward, action_id):
-        input = np.expand_dims(np.array(observation, dtype=np.float32), axis=0)
+        input = np.expand_dims(np.array(Brain.preprocess(observation), dtype=np.float32), axis=0)
         value_target = np.zeros([1], dtype=np.float32)
         value_target[0] = reward
         action_selected = np.zeros(
@@ -81,8 +94,8 @@ class Brain:
             self.train_queue[0].append(train_feed)
             self.train_queue[1].append(predict_feed)
             self.train_queue[2].append(t_mask)
-            if len(self.train_queue[0]) > 5000:
-                print("Training queue too large; optimizer likely crashed")
+            if len(self.train_queue[0]) > 50 * Brain.MIN_BATCH:
+                print("Training queue too large; optimizer likely crashed %d" % len(self.train_queue[0]))
                 exit()
 
     def optimize(self):
@@ -171,14 +184,41 @@ class Brain:
 
     def build_net(self, dev):
         with tf.variable_scope('a3c') and tf.device(dev):
-            self.input = tf.placeholder(
-                tf.float32, [None, self.input_shape[0]], name='input')
+            if len(self.input_shape) > 1:
+                self.input = tf.placeholder(
+                    tf.float32, [None, 80,80,1], name='input')
+                conv = layers.conv2d(self.input,
+                                       num_outputs=32,
+                                       kernel_size=8,
+                                       stride=4,
+                                       scope='sconv1',
+                                       activation_fn=tf.nn.relu)
+                conv = layers.conv2d(conv,
+                                       num_outputs=64,
+                                       kernel_size=4,
+                                       stride=2,
+                                       scope='sconv2',
+                                       activation_fn=tf.nn.relu)
+                conv = layers.conv2d(conv,
+                                       num_outputs=1,
+                                       kernel_size=1,
+                                       stride=1,
+                                       scope='sconv3',
+                                       activation_fn=None)
+                fc = layers.fully_connected(layers.flatten(conv),
+                                             num_outputs=32,
+                                             activation_fn=tf.nn.relu,
+                                             scope='info_fc')
+
+            else:
+                self.input = tf.placeholder(
+                    tf.float32, [None, self.input_shape[0]], name='input')
 
 
-            fc = layers.fully_connected(self.input,
-                                         num_outputs=16,
-                                         activation_fn=tf.nn.relu,
-                                         scope='info_fc')
+                fc = layers.fully_connected(self.input,
+                                             num_outputs=16,
+                                             activation_fn=tf.nn.relu,
+                                             scope='info_fc')
 
             self.action = layers.fully_connected(fc,
                                                         num_outputs=self.output_shape[0],
