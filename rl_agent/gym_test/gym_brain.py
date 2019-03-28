@@ -52,17 +52,19 @@ class Brain:
         return policy, value
 
 
-    def preprocess(obs):
-        if len(obs.shape) == 1:
-            return obs
-        # Crop everything outside the play area, reduce the image size,
-        # and convert it to black and white.
-        cropped = obs[34:194, :, :]
-        reduced = cropped[0:-1:2, 0:-1:2]
-        grayscale = np.sum(reduced, axis=2)
-        bw = np.zeros(grayscale.shape)
-        bw[grayscale != 233] = 1
-        return np.expand_dims(bw, axis=2)
+    def preprocess(data):
+        if len(data.shape) == 1:
+            return data
+        stacks = []
+        for obs in data:
+            cropped = obs[34:194, :, :]
+            reduced = cropped[0:-1:2, 0:-1:2]
+            grayscale = np.sum(reduced, axis=2)
+            bw = np.zeros(grayscale.shape)
+            bw[grayscale != 233] = 1
+            expand = np.expand_dims(bw, axis=2)
+            stacks.append(expand)
+        return np.concatenate(stacks, axis=2)
 
     def getTrainFeedDict(self, observation, reward, action_id):
         input = np.expand_dims(np.array(Brain.preprocess(observation), dtype=np.float32), axis=0)
@@ -161,7 +163,7 @@ class Brain:
             self.learning_rate = tf.placeholder(tf.float32, None, name='learning_rate')
             opt = tf.train.AdamOptimizer(self.learning_rate)
             grads, vars = zip(*opt.compute_gradients(loss))
-            grads, glob_norm = tf.clip_by_global_norm(grads, 200.0)
+            grads, glob_norm = tf.clip_by_global_norm(grads, 5.0)
             self.train_op = opt.apply_gradients(zip(grads, vars))
             if self.flags.use_tensorboard:
                 summary = []
@@ -186,7 +188,7 @@ class Brain:
         with tf.variable_scope('a3c') and tf.device(dev):
             if len(self.input_shape) > 1:
                 self.input = tf.placeholder(
-                    tf.float32, [None, 80,80,1], name='input')
+                    tf.float32, [None, 80,80,4], name='input')
                 conv = layers.conv2d(self.input,
                                        num_outputs=32,
                                        kernel_size=8,
@@ -200,13 +202,13 @@ class Brain:
                                        scope='sconv2',
                                        activation_fn=tf.nn.relu)
                 conv = layers.conv2d(conv,
-                                       num_outputs=1,
-                                       kernel_size=1,
+                                       num_outputs=64,
+                                       kernel_size=3,
                                        stride=1,
                                        scope='sconv3',
                                        activation_fn=None)
                 fc = layers.fully_connected(layers.flatten(conv),
-                                             num_outputs=32,
+                                             num_outputs=512,
                                              activation_fn=tf.nn.relu,
                                              scope='info_fc')
 
@@ -223,7 +225,7 @@ class Brain:
             self.action = layers.fully_connected(fc,
                                                         num_outputs=self.output_shape[0],
                                                         activation_fn=tf.nn.softmax,
-                                                        scope='non_spatial_action')
+                                                        scope='action')
 
             self.value = tf.reshape(layers.fully_connected(fc,
                                                       num_outputs=1,

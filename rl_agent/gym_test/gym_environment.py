@@ -32,19 +32,26 @@ class Environment(threading.Thread):
         action_id = 0
         score = 0
         observation = self.env.reset()
+        is_spatial = len(self.env.observation_space.shape) > 1
+        if is_spatial:
+            data = [observation] * 4
+        else:
+            data = observation
         while not (self.stop_signal or self.brain.stop_signal):
             time.sleep(.00001) # yield
             num_frames += 1
-            last_observation = observation
+            last_data = data
             if self.agent.name == "A3CAgent_0":
                 self.env.render()
-            action_id = self.agent.act(observation)
+            action_id = self.agent.act(np.array(last_data))
             observation, reward, done, _ = self.env.step(action_id)
             score += reward
-
+            if is_spatial:
+                data = data[1:] + [observation]
+            else:
+                data = observation
             if FLAGS.training:
-                self.agent.train(last_observation, reward, action_id, observation, done)
-
+                self.agent.train(np.array(last_data), reward, action_id, np.array(data), done)
             if done:
                 sum = tf.Summary()
                 sum.value.add(tag='score', simple_value=score)
