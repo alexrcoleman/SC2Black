@@ -131,7 +131,7 @@ class Brain:
         return tf.square(advantage)
 
     def getEntropy(self, policy):
-        return tf.reduce_sum(policy * tf.log(policy + 1e-10))
+        return tf.reduce_sum(policy * tf.log(policy + 1e-10), axis=1)
 
 
     def build_model(self, dev):
