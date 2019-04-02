@@ -43,7 +43,7 @@ class Environment(threading.Thread):
             last_data = data
             if self.agent.name == "A3CAgent_0":
                 self.env.render()
-            action_id = self.agent.act(np.array(last_data))
+            action_id, one_hot = self.agent.act(np.array(last_data))
             observation, reward, done, _ = self.env.step(action_id)
             score += reward
             if is_spatial:
@@ -51,7 +51,7 @@ class Environment(threading.Thread):
             else:
                 data = observation
             if FLAGS.training:
-                self.agent.train(np.array(last_data), reward, action_id, np.array(data), done)
+                self.agent.train(np.array(last_data), reward, one_hot, np.array(data), done)
             if done:
                 sum = tf.Summary()
                 sum.value.add(tag='score', simple_value=score)

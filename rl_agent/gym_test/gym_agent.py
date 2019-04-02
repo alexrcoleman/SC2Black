@@ -39,41 +39,38 @@ class A3CAgent(object):
         action, value = self.brain.predict(feed)
         action = action.ravel()
         # Take the node highest with the most weight
-        # action_id = np.argmax(action)
-        action_id = np.random.choice(len(action), p=action)
+        action_id = np.argmax(action)
+        # action_id = np.random.choice(len(action), p=action)
         if np.random.rand() < self.getEpsilon() and self.flags.training:
             action_id = np.random.choice(
                 np.arange(len(action)))
 
         # Update status for GUI
-        self.lastValue = value
+        self.lastValue = value 
         self.lastActionProbs = action
-        return action_id
+        one_hot = [int(i == action_id) for i in range(len(action))]
+        return action_id, one_hot
 
     # train_feed, p_feed, smask
     def train(self, last_observation, reward, action_id, observation, done):
+        self.memory.append((reward, last_observation, action_id))
         brain = self.brain
-        def get_sample(memory):
-            tf, _, _ = memory[0]
-            _, pf, smask = memory[-1]
-            memory.pop(0)
-            return tf, copy.copy(pf), self.R, smask
-
-        # print("Self memory: ", len(self.memory), self.R)
-        self.R = (self.R + reward * brain.GAMMA_N) / brain.GAMMA
-
-        self.memory.append((brain.getTrainFeedDict(last_observation, reward, action_id), brain.getPredictFeedDict(
-            observation), 0 if done else 1))
-
-        # in case the game ended in < N steps (shouldn't happen)
-        #if done:
-        #    self.R = self.R / brain.GAMMA**(brain.N_STEP_RETURN-len(self.memory))
-        while len(self.memory) >= brain.N_STEP_RETURN or (done and len(self.memory) > 0):
-            tf, pf, r, smask = get_sample(self.memory)
-            self.R = self.R - tf[brain.value_target][0]
-            if done:
-                self.R = self.R / brain.GAMMA
-            tf[brain.value_target] = np.array([r])
-            brain.add_train(tf, pf, smask)
-        if done:
-            self.R = 0
+        # print("BEG")
+        if len(self.memory) >= brain.N_STEP_RETURN or (done and len(self.memory) > 0):
+            r = 0
+            if not done:
+                _, v = brain.predict(brain.getPredictFeedDict(observation))
+                r += v[0]
+            # print("predict", v)
+            batch = [[],[],[]]
+            for sample in self.memory[::-1]:
+                # print("REWARD ", sample[0], " RUNNING ", r)
+                # print("ACTION", action)
+                r += sample[0]
+                r *= brain.GAMMA
+                batch[0].append(r)
+                batch[1].append(np.array(brain.preprocess(sample[1]), dtype=np.float32))
+                batch[2].append(sample[2])
+            # print(batch[0], "END")
+            brain.add_train(batch)
+            self.memory = []

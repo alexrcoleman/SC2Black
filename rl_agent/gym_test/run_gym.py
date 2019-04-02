@@ -41,7 +41,7 @@ def run_gym_test():
 
     envs = [Environment(FLAGS, brain, summary_writer,
                     'A3CAgent_' + str(i)) for i in range(FLAGS.parallel)]
-    opts = [Optimizer(brain) for i in range(2)]
+    opts = [Optimizer(brain) for i in range(5)]
 
     for o in opts:
         o.daemon = True

@@ -7,13 +7,13 @@ import threading
 import time
 import utils as U
 class Brain:
-    MIN_BATCH = 32
+    MIN_BATCH = 25
     def __init__(self, flags, summary_writer, input_shape, output_shape):
         self.lr = flags.learning_rate
         self.er = flags.entropy_rate
         self.flags = flags
         self.summary_writer = summary_writer
-        self.N_STEP_RETURN = 8
+        self.N_STEP_RETURN = 20
         self.GAMMA = self.flags.discount
         self.GAMMA_N = self.GAMMA**self.N_STEP_RETURN
         self.stop_signal = False
@@ -41,7 +41,7 @@ class Brain:
         self.stop_signal = True
 
     def getPredictFeedDict(self, observation):
-        input = np.expand_dims(np.array(Brain.preprocess(observation), dtype=np.float32), axis=0)
+        input = np.expand_dims(np.array(self.preprocess(observation), dtype=np.float32), axis=0)
         return {
             self.input: input,}
 
@@ -52,7 +52,7 @@ class Brain:
         return policy, value
 
 
-    def preprocess(data):
+    def preprocess(self, data):
         if len(data.shape) == 1:
             return data
         stacks = []
@@ -67,7 +67,7 @@ class Brain:
         return np.concatenate(stacks, axis=2)
 
     def getTrainFeedDict(self, observation, reward, action_id):
-        input = np.expand_dims(np.array(Brain.preprocess(observation), dtype=np.float32), axis=0)
+        input = np.expand_dims(np.array(self.preprocess(observation), dtype=np.float32), axis=0)
         value_target = np.zeros([1], dtype=np.float32)
         value_target[0] = reward
         action_selected = np.zeros(
@@ -91,12 +91,12 @@ class Brain:
                 self.summary_writer.add_summary(summary, self.training_counter)
                 self.summary_writer.flush()
 
-    def add_train(self, train_feed, predict_feed, t_mask):
+    def add_train(self, batch):
         with self.lock_queue:
-            self.train_queue[0].append(train_feed)
-            self.train_queue[1].append(predict_feed)
-            self.train_queue[2].append(t_mask)
-            if len(self.train_queue[0]) > 50 * Brain.MIN_BATCH:
+            self.train_queue[0] = self.train_queue[0] + batch[0]
+            self.train_queue[1] = self.train_queue[1] + batch[1]
+            self.train_queue[2] = self.train_queue[2] + batch[2]
+            if len(self.train_queue[0]) > (5000 * Brain.MIN_BATCH):
                 print("Training queue too large; optimizer likely crashed %d" % len(self.train_queue[0]))
                 exit()
 
@@ -109,19 +109,15 @@ class Brain:
             if len(self.train_queue[0]) < Brain.MIN_BATCH:	# more thread could have passed without lock
                 return 									# we can't yield inside lock
 
-            tfs, pfs, t_mask = self.train_queue
-            self.train_queue = [ [], [], [] ]
-
-        if len(tfs) > 5*Brain.MIN_BATCH: print("Optimizer alert! Minimizing batch of %d" % len(tfs))
-        batch_predict_feed = U.make_batch(pfs)
-        _, v = self.predict(batch_predict_feed)
-
-        batch_train_feed = U.make_batch(tfs)
-
-        r = batch_train_feed[self.value_target]
-        r = r + self.GAMMA_N * v * np.array(t_mask)
-        batch_train_feed[self.value_target] = r
-
+            batch = self.train_queue
+            self.train_queue = [[],[],[] ]
+        # print("BATCH", batch[0], batch[1], batch[2], "END")
+        if len(batch) > 5000*Brain.MIN_BATCH: print("Optimizer alert! Minimizing batch of %d" % len(batch))
+        batch_train_feed = {
+            self.value_target:np.squeeze(np.array(batch[0], dtype=np.float32)),
+            self.input:np.array(batch[1], dtype=np.float32),
+            self.action_selected:np.array(batch[2], dtype=np.float32),
+        }
         self.train(batch_train_feed)
 
     def getPolicyLoss(self, action_probability, advantage):
@@ -227,7 +223,7 @@ class Brain:
                                                         activation_fn=tf.nn.softmax,
                                                         scope='action')
 
-            self.value = tf.reshape(layers.fully_connected(fc,
+            self.value = 20 + tf.reshape(layers.fully_connected(fc,
                                                       num_outputs=1,
                                                       activation_fn=None,
                                                       scope='value'), [-1])
