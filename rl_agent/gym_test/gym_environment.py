@@ -26,6 +26,7 @@ class Environment(threading.Thread):
         self.env = gym.make(self.flags.environment)
         while not (self.stop_signal or self.brain.stop_signal):
             self.run_game()
+
     def run_game(self):
         FLAGS = self.flags
         num_frames = 0
@@ -43,7 +44,7 @@ class Environment(threading.Thread):
             last_data = data
             if self.agent.name == "A3CAgent_0":
                 self.env.render()
-            action_id, one_hot = self.agent.act(np.array(last_data))
+            action_id, one_hot, value = self.agent.act(np.array(last_data))
             observation, reward, done, _ = self.env.step(action_id)
             score += reward
             if is_spatial:
@@ -51,7 +52,7 @@ class Environment(threading.Thread):
             else:
                 data = observation
             if FLAGS.training:
-                self.agent.train(np.array(last_data), reward, one_hot, np.array(data), done)
+                self.agent.train(np.array(last_data), reward, one_hot, value, np.array(data), done)
             if done:
                 sum = tf.Summary()
                 sum.value.add(tag='score', simple_value=score)

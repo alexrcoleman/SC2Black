@@ -21,7 +21,7 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string('environment','CartPole-v0','Which gym environment to run')
 flags.DEFINE_integer("parallel", 1, "How many instances to run in parallel.")
 flags.DEFINE_bool("training", True, "Whether to train agents.")
-flags.DEFINE_float("learning_rate", 5e-3, "Learning rate for training.")
+flags.DEFINE_float("learning_rate",1e-4, "Learning rate for training.")
 flags.DEFINE_float("discount", 0.99, "Discount rate for future rewards.")
 flags.DEFINE_integer("snapshot_step", int(5e3), "Step for snapshot.")
 flags.DEFINE_float("entropy_rate", .01, "entropy weight")

@@ -10,7 +10,7 @@ from pysc2.lib import actions
 import utils as U
 import random
 import copy
-
+import scipy.signal
 
 frames = 0
 EPS_START = 0.4
@@ -39,38 +39,47 @@ class A3CAgent(object):
         action, value = self.brain.predict(feed)
         action = action.ravel()
         # Take the node highest with the most weight
-        action_id = np.argmax(action)
-        # action_id = np.random.choice(len(action), p=action)
-        if np.random.rand() < self.getEpsilon() and self.flags.training:
-            action_id = np.random.choice(
-                np.arange(len(action)))
+        # action_id = np.argmax(action)
+        action_id = np.random.choice(len(action), p=action)
+        # if np.random.rand() < self.getEpsilon() and self.flags.training:
+        #     action_id = np.random.choice(
+        #         np.arange(len(action)))
 
         # Update status for GUI
-        self.lastValue = value 
+        self.lastValue = value
         self.lastActionProbs = action
         one_hot = [int(i == action_id) for i in range(len(action))]
-        return action_id, one_hot
+        return action_id, one_hot, value[0]
+
+
+    def discount(self, x, gamma):
+        return scipy.signal.lfilter([1], [1, -gamma], x[::-1], axis=0)[::-1]
 
     # train_feed, p_feed, smask
-    def train(self, last_observation, reward, action_id, observation, done):
-        self.memory.append((reward, last_observation, action_id))
+    def train(self, last_observation, reward, action_onehot, value, observation, done):
+        self.memory.append((reward, last_observation, action_onehot, value))
         brain = self.brain
-        # print("BEG")
         if len(self.memory) >= brain.N_STEP_RETURN or (done and len(self.memory) > 0):
+            memory = self.memory
             r = 0
+            v = 0
             if not done:
                 _, v = brain.predict(brain.getPredictFeedDict(observation))
-                r += v[0]
-            # print("predict", v)
-            batch = [[],[],[]]
-            for sample in self.memory[::-1]:
-                # print("REWARD ", sample[0], " RUNNING ", r)
-                # print("ACTION", action)
-                r += sample[0]
-                r *= brain.GAMMA
-                batch[0].append(r)
-                batch[1].append(np.array(brain.preprocess(sample[1]), dtype=np.float32))
-                batch[2].append(sample[2])
-            # print(batch[0], "END")
+                v = v[0]
+                r += v * brain.GAMMA
+            batch = [[],[],[],[]]
+
+            rewards = np.asarray([x[0] for x in memory])
+            values = np.asarray([x[3] for x in memory] + [v])
+            rewardsPlusV = np.append(rewards, [r])
+            batch_r = self.discount(rewardsPlusV, brain.GAMMA)[:-1]
+            delta_t = rewards + brain.GAMMA * values[1:] - values[:-1]
+            batch_adv = self.discount(delta_t, brain.GAMMA * brain.LAMBDA)
+
+            batch[0] = batch_r.tolist()
+            batch[1] = [np.asarray(brain.preprocess(x[1])) for x in memory]
+            batch[2] = [np.asarray(x[2]) for x in memory]
+            batch[3] = batch_adv.tolist()
+
             brain.add_train(batch)
             self.memory = []

@@ -6,6 +6,7 @@ import numpy as np
 import threading
 import time
 import utils as U
+
 class Brain:
     MIN_BATCH = 25
     def __init__(self, flags, summary_writer, input_shape, output_shape):
@@ -14,14 +15,14 @@ class Brain:
         self.flags = flags
         self.summary_writer = summary_writer
         self.N_STEP_RETURN = 20
-        self.GAMMA = self.flags.discount
-        self.GAMMA_N = self.GAMMA**self.N_STEP_RETURN
+        self.GAMMA = .99
+        self.LAMBDA = 1
         self.stop_signal = False
         self.input_shape = input_shape
         self.output_shape = output_shape
 
         self.lock_queue = threading.Lock()
-        self.train_queue = [[], [], []]
+        self.train_queue = [[], [], [], []]
 
 
         self.counter_lock = threading.Lock()
@@ -66,20 +67,6 @@ class Brain:
             stacks.append(expand)
         return np.concatenate(stacks, axis=2)
 
-    def getTrainFeedDict(self, observation, reward, action_id):
-        input = np.expand_dims(np.array(self.preprocess(observation), dtype=np.float32), axis=0)
-        value_target = np.zeros([1], dtype=np.float32)
-        value_target[0] = reward
-        action_selected = np.zeros(
-            [1, self.output_shape[0]], dtype=np.float32)
-        action_selected[0, action_id] = 1
-        return {
-            self.input:input,
-            self.value_target: value_target,
-            self.action_selected: action_selected,
-        }
-
-
     def train(self, feed):
         feed[self.learning_rate] = self.lr
         feed[self.entropy_rate] = self.er
@@ -96,35 +83,35 @@ class Brain:
             self.train_queue[0] = self.train_queue[0] + batch[0]
             self.train_queue[1] = self.train_queue[1] + batch[1]
             self.train_queue[2] = self.train_queue[2] + batch[2]
+            self.train_queue[3] = self.train_queue[3] + batch[3]
             if len(self.train_queue[0]) > (5000 * Brain.MIN_BATCH):
                 print("Training queue too large; optimizer likely crashed %d" % len(self.train_queue[0]))
                 exit()
 
     def optimize(self):
         time.sleep(0.001)
-        if len(self.train_queue[0]) < Brain.MIN_BATCH:
-            return
 
         with self.lock_queue:
             if len(self.train_queue[0]) < Brain.MIN_BATCH:	# more thread could have passed without lock
                 return 									# we can't yield inside lock
 
             batch = self.train_queue
-            self.train_queue = [[],[],[] ]
+            self.train_queue = [[],[],[],[]]
         # print("BATCH", batch[0], batch[1], batch[2], "END")
         if len(batch) > 5000*Brain.MIN_BATCH: print("Optimizer alert! Minimizing batch of %d" % len(batch))
         batch_train_feed = {
             self.value_target:np.squeeze(np.array(batch[0], dtype=np.float32)),
             self.input:np.array(batch[1], dtype=np.float32),
             self.action_selected:np.array(batch[2], dtype=np.float32),
+            self.advantage:np.array(batch[3], dtype=np.float32),
         }
         self.train(batch_train_feed)
 
     def getPolicyLoss(self, action_probability, advantage):
-        return -tf.log(action_probability + 1e-10) * tf.stop_gradient(advantage)
+        return -tf.log(action_probability + 1e-10) * advantage
 
-    def getValueLoss(self, advantage):
-        return tf.square(advantage)
+    def getValueLoss(self, difference):
+        return tf.square(difference)
 
     def getEntropy(self, policy):
         return tf.reduce_sum(policy * tf.log(policy + 1e-10), axis=1)
@@ -139,6 +126,8 @@ class Brain:
                 tf.float32, [None], name='value_target')
             self.entropy_rate = tf.placeholder(
                 tf.float32, None, name='entropy_rate')
+            self.learning_rate = tf.placeholder(tf.float32, None, name='learning_rate')
+            self.advantage = tf.placeholder(tf.float32, [None], name='advantage')
 
             # This will get the probability of choosing a valid action. Given that we force it to choose from
             # the set of valid actions. The probability of an action is the probability the policy chooses
@@ -146,20 +135,16 @@ class Brain:
             action_probability = tf.reduce_sum(
                 self.action_selected * self.action, axis=1)
 
-            # The advantage function, which will represent how much better this action was than what was expected from this state
-            advantage = self.value_target - self.value
-
-            policy_loss = self.getPolicyLoss(action_probability, advantage)
-            value_loss = self.getValueLoss(advantage)
+            policy_loss = self.getPolicyLoss(action_probability, self.advantage)
+            value_loss = self.getValueLoss(self.value_target - self.value)
             entropy = self.getEntropy(self.action)
 
-            loss = tf.reduce_mean(policy_loss + value_loss * .5 + entropy * self.entropy_rate)
+            loss = tf.reduce_mean(policy_loss + value_loss * .5 + entropy *.01)
 
             # Build the optimizer
-            self.learning_rate = tf.placeholder(tf.float32, None, name='learning_rate')
             opt = tf.train.AdamOptimizer(self.learning_rate)
             grads, vars = zip(*opt.compute_gradients(loss))
-            grads, glob_norm = tf.clip_by_global_norm(grads, 5.0)
+            grads, glob_norm = tf.clip_by_global_norm(grads, 40.0)
             self.train_op = opt.apply_gradients(zip(grads, vars))
             if self.flags.use_tensorboard:
                 summary = []
@@ -172,7 +157,7 @@ class Brain:
                 summary.append(tf.summary.scalar(
                     'entropy_loss', tf.reduce_mean(entropy)))
                 summary.append(tf.summary.scalar(
-                    'advantage', tf.reduce_mean(advantage)))
+                    'advantage', tf.reduce_mean(self.advantage)))
                 summary.append(tf.summary.scalar(
                     'loss', tf.reduce_mean(loss)))
                 self.summary_op = tf.summary.merge(summary)
@@ -223,7 +208,7 @@ class Brain:
                                                         activation_fn=tf.nn.softmax,
                                                         scope='action')
 
-            self.value = 20 + tf.reshape(layers.fully_connected(fc,
+            self.value = tf.reshape(layers.fully_connected(fc,
                                                       num_outputs=1,
                                                       activation_fn=None,
                                                       scope='value'), [-1])
