@@ -9,24 +9,22 @@ import time
 
 class Brain:
     MIN_BATCH = 25
-    MIN_EPS = .01
-    MAX_EPS = .2
     def __init__(self, flags, summary_writer):
         self.lr = flags.learning_rate
         self.er = flags.entropy_rate
-        self.eps = Brain.MAX_EPS
         self.flags = flags
         self.summary_writer = summary_writer
-        self.N_STEP_RETURN = 10
-        self.GAMMA = self.flags.discount
-        self.GAMMA_N = self.GAMMA**self.N_STEP_RETURN
+        self.N_STEP_RETURN = 20
+        self.GAMMA = .99
+        self.LAMBDA = 1
+
         self.ssize = 64
         self.isize = len(U.useful_actions)
         self.custom_input_size = 1 + len(U.useful_actions)
         self.stop_signal = False
 
         self.lock_queue = threading.Lock()
-        self.train_queue = [[], [], []]
+        self.train_queue = [[], [], [], [], []]
 
 
         self.counter_lock = threading.Lock()
@@ -60,18 +58,13 @@ class Brain:
 
     def getTrainFeedDict(self, obs, action, attributed_act_id):
         screen = np.array(obs.observation['feature_screen'], dtype=np.float32)
-        screen = np.expand_dims(U.preprocess_screen(screen), axis=0)
-        info = np.zeros([1, len(U.useful_actions)], dtype=np.float32)
-        info[0, U.compressActions(obs.observation['available_actions'])] = 1
-        value_target = np.zeros([1], dtype=np.float32)
-        value_target[0] = obs.reward
-        valid_spatial_action = np.zeros([1], dtype=np.float32)
-        spatial_action_selected = np.zeros([1, self.ssize**2], dtype=np.float32)
-        valid_non_spatial_action = np.zeros([1, len(U.useful_actions)], dtype=np.float32)
-        non_spatial_action_selected = np.zeros(
-            [1, len(U.useful_actions)], dtype=np.float32)
-        custom_inputs = np.expand_dims(
-            np.array(obs.observation.custom_inputs, dtype=np.float32), axis=0)
+        screen = U.preprocess_screen(screen)
+        info = np.zeros([len(U.useful_actions)], dtype=np.float32)
+        info[U.compressActions(obs.observation['available_actions'])] = 1
+        valid_spatial_action = 0
+        valid_non_spatial_action = np.zeros([len(U.useful_actions)], dtype=np.float32)
+
+        custom_inputs = np.array(obs.observation.custom_inputs, dtype=np.float32)
 
         act_id = action.function
         net_act_id = attributed_act_id
@@ -80,24 +73,19 @@ class Brain:
         player_relative = obs.observation.feature_screen.player_relative
         valid_actions = obs.observation["available_actions"]
         valid_actions = U.compressActions(valid_actions)
-        valid_non_spatial_action[0, valid_actions] = 1
-        non_spatial_action_selected[0, net_act_id] = 1
+        valid_non_spatial_action[valid_actions] = 1
 
         args = actions.FUNCTIONS[act_id].args
         for arg, act_arg in zip(args, act_args):
             if arg.name in ('screen', 'minimap', 'screen2') and (not self.flags.force_focus_fire or (act_id != 12 and act_id != 2)):
-                ind = act_arg[1] * self.ssize + act_arg[0]
-                valid_spatial_action[0] = 1
-                spatial_action_selected[0, ind] = 1
+                valid_spatial_action = 1
+
         return {
-            self.screen: screen,
-            self.info: info,
-            self.custom_inputs: custom_inputs,
-            self.value_target: value_target,
-            self.valid_spatial_action: valid_spatial_action,
-            self.spatial_action_selected: spatial_action_selected,
-            self.valid_non_spatial_action: valid_non_spatial_action,
-            self.non_spatial_action_selected: non_spatial_action_selected,
+            self.screen: screen, # yes
+            self.info: info, # yes
+            self.custom_inputs: custom_inputs, #yes
+            self.valid_spatial_action: valid_spatial_action, #yes
+            self.valid_non_spatial_action: valid_non_spatial_action, # yes
         }
 
     def predict(self, feed):
@@ -107,12 +95,11 @@ class Brain:
         return nspatial, spatial, v
 
     def train(self, feed):
-        feed[self.learning_rate] = self.lr * (1 - 0.9 * self.training_counter / self.flags.max_train_steps)
-        feed[self.entropy_rate] = self.er * (1 - 0.5 * self.training_counter / self.flags.max_train_steps)
+        feed[self.learning_rate] = self.lr
+        feed[self.entropy_rate] = self.er
 
         _, summary = self.session.run([self.train_op, self.summary_op], feed_dict=feed)
         with self.counter_lock:
-            self.eps = max(self.eps * .999, Brain.MIN_EPS)
             local_counter = self.training_counter
             self.training_counter = self.training_counter + 1
         if self.flags.use_tensorboard:
@@ -126,50 +113,53 @@ class Brain:
                 print("Reached step %d, training complete." % local_counter)
                 self.stop()
 
-    def add_train(self, train_feed, predict_feed, t_mask):
+    def add_train(self, batch):
         with self.lock_queue:
-            self.train_queue[0].append(train_feed)
-            self.train_queue[1].append(predict_feed)
-            self.train_queue[2].append(t_mask)
-            if len(self.train_queue[0]) > 5000:
+            self.train_queue[0] = self.train_queue[0] + batch[0]
+            self.train_queue[1] = self.train_queue[1] + batch[1]
+            self.train_queue[2] = self.train_queue[2] + batch[2]
+            self.train_queue[3] = self.train_queue[3] + batch[3]
+            self.train_queue[4] = self.train_queue[4] + batch[4]
+            if len(self.train_queue[0]) > (5000 * Brain.MIN_BATCH):
                 print("Training queue too large; optimizer likely crashed")
                 exit()
 
     def optimize(self):
         time.sleep(0.001)
-        if len(self.train_queue[0]) < Brain.MIN_BATCH:
-            return
 
         with self.lock_queue:
             if len(self.train_queue[0]) < Brain.MIN_BATCH:
                 return
 
-            tfs, pfs, t_mask = self.train_queue
-            self.train_queue = [ [], [], [] ]
+            batch = self.train_queue
+            self.train_queue = [[],[],[],[],[]]
 
-        if len(tfs) > 5*Brain.MIN_BATCH: print("Optimizer alert! Minimizing batch of %d" % len(tfs))
-        batch_predict_feed = U.make_batch(pfs)
-        _, _, v = self.predict(batch_predict_feed)
 
-        batch_train_feed = U.make_batch(tfs)
-
-        r = batch_train_feed[self.value_target]
-        r = r + self.GAMMA_N * v * np.array(t_mask)
-        batch_train_feed[self.value_target] = r
+        batch_train_feed = {
+            self.value_target:np.squeeze(np.array(batch[0], dtype=np.float32)),
+            self.screen:np.asarray([x[self.screen] for x in batch[1]],dtype=np.float32),
+            self.info:np.asarray([x[self.info] for x in batch[1]],dtype=np.float32),
+            self.custom_inputs:np.asarray([x[self.custom_inputs] for x in batch[1]],dtype=np.float32),
+            self.valid_spatial_action:np.asarray([x[self.valid_spatial_action] for x in batch[1]],dtype=np.float32),
+            self.valid_non_spatial_action:np.asarray([x[self.valid_non_spatial_action] for x in batch[1]],dtype=np.float32),
+            self.non_spatial_action_selected:np.array(batch[2], dtype=np.float32),
+            self.spatial_action_selected:np.array(batch[3], dtype=np.float32),
+            self.advantage:np.array(batch[4], dtype=np.float32),
+        }
 
         self.train(batch_train_feed)
 
     def getPolicyLoss(self, action_probability, advantage):
-        return -tf.log(action_probability + 1e-10) * tf.stop_gradient(advantage)
+        return -tf.log(action_probability + 1e-10) * advantage
 
-    def getValueLoss(self, advantage):
-        return tf.square(advantage)
+    def getValueLoss(self, difference):
+        return tf.square(difference)
 
     def getEntropy(self, policy, spatial_policy, valid_spatial):
         return tf.reduce_sum(policy * tf.log(policy + 1e-10), axis=1) + tf.reduce_sum(spatial_policy * tf.log(spatial_policy + 1e-10), axis=1)
 
-    def getMinRoachHealthLoss(self, roach_target, roach_prediction):
-        return tf.reduce_sum(tf.square(roach_target - roach_prediction), axis=1)
+    # def getMinRoachHealthLoss(self, roach_target, roach_prediction):
+    #     return tf.reduce_sum(tf.square(roach_target - roach_prediction), axis=1)
 
     def build_model(self, dev):
         with tf.variable_scope('a3c') and tf.device(dev):
@@ -186,6 +176,9 @@ class Brain:
                 tf.float32, [None], name='value_target')
             self.entropy_rate = tf.placeholder(
                 tf.float32, None, name='entropy_rate')
+            self.advantage = tf.placeholder(tf.float32, [None], name='advantage')
+            self.learning_rate = tf.placeholder(tf.float32, None, name='learning_rate')
+
 
             # This will get the probability of choosing a valid action. Given that we force it to choose from
             # the set of valid actions. The probability of an action is the probability the policy chooses
@@ -205,21 +198,23 @@ class Brain:
             action_probability = non_spatial_action_prob * spatial_action_prob
 
             # The advantage function, which will represent how much better this action was than what was expected from this state
-            advantage = self.value_target - self.value
 
-            policy_loss = self.getPolicyLoss(action_probability, advantage)
-            value_loss = self.getValueLoss(advantage)
+
+            policy_loss = self.getPolicyLoss(action_probability, self.advantage)
+            value_loss = self.getValueLoss(self.value_target - self.value)
             entropy = self.getEntropy(
                 self.non_spatial_action, self.spatial_action, self.valid_spatial_action)
 
-            loss = tf.reduce_mean(policy_loss + value_loss * .5 + entropy * self.entropy_rate)
-
+            loss = tf.reduce_mean(policy_loss + value_loss * .5 + entropy * .01)
             # Build the optimizer
-            self.learning_rate = tf.placeholder(tf.float32, None, name='learning_rate')
+            global_step = tf.Variable(0)
+            learning_rate_decayed = tf.train.exponential_decay(self.learning_rate,
+            global_step,10000, .95, staircase=True)
+
             opt = tf.train.AdamOptimizer(self.learning_rate)
             grads, vars = zip(*opt.compute_gradients(loss))
-            grads, glob_norm = tf.clip_by_global_norm(grads, 50.0)
-            self.train_op = opt.apply_gradients(zip(grads, vars))
+            grads, glob_norm = tf.clip_by_global_norm(grads, 40.0)
+            self.train_op = opt.apply_gradients(zip(grads, vars), global_step=global_step)
             if self.flags.use_tensorboard:
                 summary = []
                 summary.append(tf.summary.scalar(
@@ -231,7 +226,7 @@ class Brain:
                 summary.append(tf.summary.scalar(
                     'entropy_loss', tf.reduce_mean(entropy)))
                 summary.append(tf.summary.scalar(
-                    'advantage', tf.reduce_mean(advantage)))
+                    'advantage', tf.reduce_mean(self.advantage)))
                 summary.append(tf.summary.scalar(
                     'loss', tf.reduce_mean(loss)))
                 self.summary_op = tf.summary.merge(summary)

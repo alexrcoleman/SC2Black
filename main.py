@@ -23,7 +23,7 @@ from optimizer import Optimizer
 FLAGS = flags.FLAGS
 flags.DEFINE_bool("training", True, "Whether to train agents.")
 flags.DEFINE_bool("continuation", False, "Continuously training.")
-flags.DEFINE_float("learning_rate", 5e-3, "Learning rate for training.")
+flags.DEFINE_float("learning_rate", 1e-4, "Learning rate for training.")
 flags.DEFINE_float("discount", 0.99, "Discount rate for future rewards.")
 flags.DEFINE_integer("max_train_steps", int(1e6), "Total steps for training.")
 flags.DEFINE_integer("snapshot_step", int(5e3), "Step for snapshot.")
@@ -58,7 +58,7 @@ def _main(unused_argv):
 
     envs = [Environment(FLAGS, brain, max_agent_steps, summary_writer,
                         'A3CAgent_' + str(i)) for i in range(FLAGS.parallel)]
-    opts = [Optimizer(brain) for i in range(2)]
+    opts = [Optimizer(brain) for i in range(5)]
 
     for o in opts:
         o.daemon = True

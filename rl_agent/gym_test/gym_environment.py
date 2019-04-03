@@ -35,7 +35,7 @@ class Environment(threading.Thread):
         observation = self.env.reset()
         is_spatial = len(self.env.observation_space.shape) > 1
         if is_spatial:
-            data = [observation] * 4
+            data = [observation] * 2
         else:
             data = observation
         while not (self.stop_signal or self.brain.stop_signal):

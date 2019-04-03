@@ -64,7 +64,7 @@ class Environment(threading.Thread):
                         timestep.observation.available_actions, index)
             #self.bench("part1")
 
-            last_net_act_id, act = self.agent.act(timestep)
+            last_net_act_id, act, action_onehot, spatial_onehot, value = self.agent.act(timestep)
             #self.bench("agent")
 
             timestep = self.env.step([act])[0]
@@ -75,7 +75,7 @@ class Environment(threading.Thread):
 
 
             if FLAGS.training:
-                self.agent.train(last_timestep, last_net_act_id, act, timestep)
+                self.agent.train(last_timestep, action_onehot, spatial_onehot, value, timestep, act, last_net_act_id)
             #self.bench("train")
             if is_done:
                 score = timestep.observation["score_cumulative"][0]

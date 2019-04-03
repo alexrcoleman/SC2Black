@@ -97,8 +97,7 @@ class Brain:
 
             batch = self.train_queue
             self.train_queue = [[],[],[],[]]
-        # print("BATCH", batch[0], batch[1], batch[2], "END")
-        if len(batch) > 5000*Brain.MIN_BATCH: print("Optimizer alert! Minimizing batch of %d" % len(batch))
+
         batch_train_feed = {
             self.value_target:np.squeeze(np.array(batch[0], dtype=np.float32)),
             self.input:np.array(batch[1], dtype=np.float32),
@@ -141,11 +140,15 @@ class Brain:
 
             loss = tf.reduce_mean(policy_loss + value_loss * .5 + entropy *.01)
 
+            global_step = tf.Variable(0)
+            learning_rate_decayed = tf.train.exponential_decay(self.learning_rate,
+            global_step,10000, .95, staircase=True)
+
             # Build the optimizer
-            opt = tf.train.AdamOptimizer(self.learning_rate)
+            opt = tf.train.AdamOptimizer(learning_rate_decayed)
             grads, vars = zip(*opt.compute_gradients(loss))
             grads, glob_norm = tf.clip_by_global_norm(grads, 40.0)
-            self.train_op = opt.apply_gradients(zip(grads, vars))
+            self.train_op = opt.apply_gradients(zip(grads, vars), global_step=global_step)
             if self.flags.use_tensorboard:
                 summary = []
                 summary.append(tf.summary.scalar(
@@ -169,7 +172,7 @@ class Brain:
         with tf.variable_scope('a3c') and tf.device(dev):
             if len(self.input_shape) > 1:
                 self.input = tf.placeholder(
-                    tf.float32, [None, 80,80,4], name='input')
+                    tf.float32, [None, 80,80,2], name='input')
                 conv = layers.conv2d(self.input,
                                        num_outputs=32,
                                        kernel_size=8,

@@ -10,6 +10,7 @@ from pysc2.lib import actions
 import utils as U
 import random
 import copy
+import scipy.signal
 
 class A3CAgent(object):
     def __init__(self, flags, brain, ssize, name):
@@ -44,18 +45,22 @@ class A3CAgent(object):
         if len(valid_actions) > 0:
             valid_action_p = non_spatial_action_p[valid_actions] + 1e-12
             valid_action_p = valid_action_p / np.sum(valid_action_p)
-            # node_non_spatial_id = np.random.choice(np.arange(len(valid_actions)), p=valid_action_p)
-            # node_spatial_id = np.random.choice(np.arange(len(spatial_action_p)), p=spatial_action_p)
-            node_non_spatial_id = np.argmax(valid_action_p)
-            node_spatial_id = np.argmax(spatial_action_p)
-            if np.random.rand() < self.brain.eps and self.flags.training:
-                node_non_spatial_id = np.random.choice(
-                    np.arange(len(valid_actions)))
-            if np.random.rand() < self.brain.eps and self.flags.training:
-                node_spatial_id = np.random.choice(
-                    np.arange(len(spatial_action_p)))
-                    
+            node_non_spatial_id = np.random.choice(np.arange(len(valid_actions)), p=valid_action_p)
+            node_spatial_id = np.random.choice(np.arange(len(spatial_action_p)), p=spatial_action_p)
+            # node_non_spatial_id = np.argmax(valid_action_p)
+            # node_spatial_id = np.argmax(spatial_action_p)
+            # if np.random.rand() < self.brain.eps and self.flags.training:
+            #     node_non_spatial_id = np.random.choice(
+            #         np.arange(len(valid_actions)))
+            # if np.random.rand() < self.brain.eps and self.flags.training:
+            #     node_spatial_id = np.random.choice(
+            #         np.arange(len(spatial_action_p)))
+
         # Map these into actual actions / location
+
+        action_one_hot = [int(i == node_non_spatial_id) for i in range(len(non_spatial_action_p))]
+        spatial_one_hot = [int(i == node_spatial_id) for i in range(len(spatial_action_p))]
+
         net_act_id = 0
         if len(valid_actions) > 0:
             net_act_id = valid_actions[node_non_spatial_id]
@@ -91,33 +96,41 @@ class A3CAgent(object):
         self.lastActionName = actions.FUNCTIONS[act_id].name
         self.lastActionProbs = non_spatial_action_p
         self.last_spatial = spatial_action_p
-        return net_act_id, actions.FunctionCall(act_id, act_args)
+        return net_act_id, actions.FunctionCall(act_id, act_args), action_one_hot, spatial_one_hot, value[0]
+
+    def discount(self, x, gamma):
+        return scipy.signal.lfilter([1], [1, -gamma], x[::-1], axis=0)[::-1]
 
     # train_feed, p_feed, smask
-    def train(self, timestep, net_act_id, act, next_timestep):
+    def train(self, timestep, action_onehot, spatial_onehot, value, next_timestep, act, act_id):
         brain = self.brain
-        def get_sample(memory):
-            tf, _, _ = memory[0]
-            _, pf, smask = memory[-1]
-            memory.pop(0)
-            return tf, copy.copy(pf), self.R, smask
+        feature_dict = brain.getTrainFeedDict(timestep, act, act_id)
+        self.memory.append((timestep.reward, feature_dict, action_onehot, spatial_onehot, value))
 
-        # print("Self memory: ", len(self.memory), self.R)
-        self.R = (self.R + timestep.reward * brain.GAMMA_N) / brain.GAMMA
+        if len(self.memory) >= brain.N_STEP_RETURN or (next_timestep.last() and len(self.memory) > 0):
+            memory = self.memory
+            r = 0
+            v = 0
+            if not next_timestep.last():
+                _, _, v = brain.predict(brain.getPredictFeedDict(next_timestep))
+                v = v[0]
+                r += v
+            batch = [[],[],[],[],[]]
 
-        self.memory.append((brain.getTrainFeedDict(timestep, act, net_act_id), brain.getPredictFeedDict(
-            next_timestep), 0 if next_timestep.last() else 1))
 
-        # in case the game ended in < N steps (shouldn't happen)
-        if timestep.last():
-            self.R = self.R / brain.GAMMA**(brain.N_STEP_RETURN-len(self.memory))
-            print("WARNING: Game ended in under %d steps" % brain.N_STEP_RETURN)
-        while len(self.memory) >= brain.N_STEP_RETURN or (next_timestep.last() and len(self.memory) > 0):
-            tf, pf, r, smask = get_sample(self.memory)
-            self.R = self.R - tf[brain.value_target][0]
-            if next_timestep.last():
-                self.R = self.R / brain.GAMMA
-            tf[brain.value_target] = np.array([r])
-            brain.add_train(tf, pf, smask)
-        if next_timestep.last():
-            self.R = 0
+            rewards = np.asarray([x[0] for x in memory])
+            values = np.asarray([x[4] for x in memory] + [v])
+            rewardsPlusV = np.append(rewards, [r])
+            batch_r = self.discount(rewardsPlusV, brain.GAMMA)[:-1]
+            batch_r = self.discount(rewardsPlusV, brain.GAMMA)[:-1]
+            delta_t = rewards + brain.GAMMA * values[1:] - values[:-1]
+            batch_adv = self.discount(delta_t, brain.GAMMA * brain.LAMBDA)
+
+            batch[0] = batch_r.tolist()
+            batch[1] = [x[1] for x in memory]
+            batch[2] = [np.asarray(x[2]) for x in memory]
+            batch[3] = [np.asarray(x[3]) for x in memory]
+            batch[4] = batch_adv.tolist()
+
+            brain.add_train(batch)
+            self.memory = []

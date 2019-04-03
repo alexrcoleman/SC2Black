@@ -66,7 +66,7 @@ class A3CAgent(object):
             if not done:
                 _, v = brain.predict(brain.getPredictFeedDict(observation))
                 v = v[0]
-                r += v * brain.GAMMA
+                r += v
             batch = [[],[],[],[]]
 
             rewards = np.asarray([x[0] for x in memory])
