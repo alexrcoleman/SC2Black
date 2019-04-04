@@ -66,7 +66,6 @@ class Environment(threading.Thread):
 
             last_net_act_id, act, action_onehot, spatial_onehot, value = self.agent.act(timestep)
             #self.bench("agent")
-
             timestep = self.env.step([act])[0]
             #self.bench("env a")
             self.addInputs(timestep, num_frames, last_net_act_id)

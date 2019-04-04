@@ -4,7 +4,6 @@ from __future__ import print_function
 
 import os
 import numpy as np
-import tensorflow as tf
 from pysc2.lib import actions
 
 import utils as U
@@ -30,22 +29,23 @@ class A3CAgent(object):
 
     def act(self, obs):
         feed = self.brain.getPredictFeedDict(obs)
-        non_spatial_action_p, spatial_action_p, value = self.brain.predict(feed)
+        action_p, spatial_action_p, value = self.brain.predict(feed)
 
         # Select an action and a spatial target
-        non_spatial_action_p = non_spatial_action_p.ravel()
-        old = spatial_action_p
+        action_p = action_p.ravel()
         spatial_action_p = spatial_action_p.ravel()
         valid_actions = obs.observation['available_actions']
         valid_actions = U.compressActions(valid_actions)
+
 
         # Take the node highest with the most weight
         node_non_spatial_id = 0
         node_spatial_id = 0
         if len(valid_actions) > 0:
-            valid_action_p = non_spatial_action_p[valid_actions] + 1e-12
+            valid_action_p = action_p[valid_actions] + 1e-12
             valid_action_p = valid_action_p / np.sum(valid_action_p)
             node_non_spatial_id = np.random.choice(np.arange(len(valid_actions)), p=valid_action_p)
+
             node_spatial_id = np.random.choice(np.arange(len(spatial_action_p)), p=spatial_action_p)
             # node_non_spatial_id = np.argmax(valid_action_p)
             # node_spatial_id = np.argmax(spatial_action_p)
@@ -58,7 +58,7 @@ class A3CAgent(object):
 
         # Map these into actual actions / location
 
-        action_one_hot = [int(i == node_non_spatial_id) for i in range(len(non_spatial_action_p))]
+        action_one_hot = [int(i == node_non_spatial_id) for i in range(len(action_p))]
         spatial_one_hot = [int(i == node_spatial_id) for i in range(len(spatial_action_p))]
 
         net_act_id = 0
@@ -94,7 +94,7 @@ class A3CAgent(object):
         self.lastValue = value
         self.lastLocation = target
         self.lastActionName = actions.FUNCTIONS[act_id].name
-        self.lastActionProbs = non_spatial_action_p
+        self.lastActionProbs = action_p
         self.last_spatial = spatial_action_p
         return net_act_id, actions.FunctionCall(act_id, act_args), action_one_hot, spatial_one_hot, value[0]
 
@@ -106,7 +106,6 @@ class A3CAgent(object):
         brain = self.brain
         feature_dict = brain.getTrainFeedDict(timestep, act, act_id)
         self.memory.append((timestep.reward, feature_dict, action_onehot, spatial_onehot, value))
-
         if len(self.memory) >= brain.N_STEP_RETURN or (next_timestep.last() and len(self.memory) > 0):
             memory = self.memory
             r = 0
@@ -120,6 +119,7 @@ class A3CAgent(object):
 
             rewards = np.asarray([x[0] for x in memory])
             values = np.asarray([x[4] for x in memory] + [v])
+            # print("VALUES", values)
             rewardsPlusV = np.append(rewards, [r])
             batch_r = self.discount(rewardsPlusV, brain.GAMMA)[:-1]
             batch_r = self.discount(rewardsPlusV, brain.GAMMA)[:-1]

@@ -22,7 +22,7 @@ useful_screens = [
 ]
 useful_actions = [
     0,  # no_op
-    2,  # select_point
+    # 2,  # select_point
     # 3, # select_rect
     # 4, # select_control_group
     # 5, # select_unit
@@ -32,7 +32,7 @@ useful_actions = [
     7,  # select_army
     12,  # Attack_screen
     # 274, # HoldPosition_quick
-    331,  # Move_screen
+    # 331,  # Move_screen
     # 333, # Patrol_screen
     # 453, # Stop_quick
 ]

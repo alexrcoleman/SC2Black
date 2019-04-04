@@ -23,7 +23,7 @@ from optimizer import Optimizer
 FLAGS = flags.FLAGS
 flags.DEFINE_bool("training", True, "Whether to train agents.")
 flags.DEFINE_bool("continuation", False, "Continuously training.")
-flags.DEFINE_float("learning_rate", 1e-4, "Learning rate for training.")
+flags.DEFINE_float("learning_rate", 1e-6, "Learning rate for training.")
 flags.DEFINE_float("discount", 0.99, "Discount rate for future rewards.")
 flags.DEFINE_integer("max_train_steps", int(1e6), "Total steps for training.")
 flags.DEFINE_integer("snapshot_step", int(5e3), "Step for snapshot.")
