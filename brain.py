@@ -7,6 +7,8 @@ import threading
 import time
 
 from tensorflow.keras.layers import Conv2D
+from tensorflow.keras.layers import GRU
+from tensorflow.keras.layers import LSTM
 from tensorflow.keras.layers import Concatenate
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.layers import Flatten
@@ -24,17 +26,17 @@ class Brain:
         self.er = flags.entropy_rate
         self.flags = flags
         self.summary_writer = summary_writer
-        self.N_STEP_RETURN = 20
+        self.N_STEP_RETURN = 40
         self.GAMMA = .99
         self.LAMBDA = 1
-        self.eps = .1
-        self.ssize = 64
+        self.eps = .2
+        self.ssize = 32
         self.isize = len(U.useful_actions)
         self.custom_input_size = 1 + len(U.useful_actions)
         self.stop_signal = False
 
         self.lock_queue = threading.Lock()
-        self.train_queue = [[], [], [], [], []]
+        self.train_queue = [[], [], [], [], [], [], []]
 
 
         self.counter_lock = threading.Lock()
@@ -50,22 +52,27 @@ class Brain:
         self.session.run(tf.global_variables_initializer())
         self.default_graph = tf.get_default_graph()
         self.default_graph.finalize()
+        self.summary_writer.add_graph(self.default_graph)
+        # self.debug = np.array([])
 
     def stop(self):
         self.stop_signal = True
 
-    def getPredictFeedDict(self, obs):
+    def getPredictFeedDict(self, obs, hState, cState):
         screen = np.array(obs.observation['feature_screen'], dtype=np.float32)
         screen = np.expand_dims(U.preprocess_screen(screen), axis=0)
         info = np.zeros([1, len(U.useful_actions)], dtype=np.float32)
         info[0, U.compressActions(obs.observation['available_actions'])] = 1
         custom_inputs = np.expand_dims(
             np.array(obs.observation.custom_inputs, dtype=np.float32), axis=0)
-
+        hState = np.expand_dims(np.array(hState), axis=0)
+        cState = np.expand_dims(np.array(cState), axis=0)
         return {
             self.screen: screen,
             self.info: info,
-            self.custom_inputs: custom_inputs, }
+            self.custom_inputs: custom_inputs,
+            self.hStateInput: hState,
+            self.cStateInput: cState }
 
     def getTrainFeedDict(self, obs, action, attributed_act_id):
         screen = np.array(obs.observation['feature_screen'], dtype=np.float32)
@@ -101,8 +108,24 @@ class Brain:
 
     def predict(self, feed):
         with self.session.as_default():
-            v, policy, spatialPolicy = self.model.predict([feed[self.screen],feed[self.info],feed[self.custom_inputs]])
-            return policy, spatialPolicy, v
+            v, policy, spatialPolicy, hS, cS = self.model.predict([
+                feed[self.screen],
+                feed[self.info],
+                feed[self.custom_inputs],
+                feed[self.hStateInput],
+                feed[self.cStateInput],
+            ])
+
+            # conv1 = self.dmodel.predict([
+            #     feed[self.screen],
+            #     feed[self.info],
+            #     feed[self.custom_inputs],
+            #     feed[self.hStateInput],
+            #     feed[self.cStateInput],
+            # ])
+            # print(np.array_equal(conv1, self.debug))
+            # self.debug = conv1
+            return policy, spatialPolicy, v, hS, cS
 
 
     def train(self, feed):
@@ -126,11 +149,9 @@ class Brain:
 
     def add_train(self, batch):
         with self.lock_queue:
-            self.train_queue[0] = self.train_queue[0] + batch[0]
-            self.train_queue[1] = self.train_queue[1] + batch[1]
-            self.train_queue[2] = self.train_queue[2] + batch[2]
-            self.train_queue[3] = self.train_queue[3] + batch[3]
-            self.train_queue[4] = self.train_queue[4] + batch[4]
+            for i in range(len(self.train_queue)):
+                self.train_queue[i] = self.train_queue[i] + batch[i]
+
             if len(self.train_queue[0]) > (5000 * Brain.MIN_BATCH):
                 print("Training queue too large; optimizer likely crashed")
                 exit()
@@ -143,7 +164,7 @@ class Brain:
                 return
 
             batch = self.train_queue
-            self.train_queue = [[],[],[],[],[]]
+            self.train_queue = [[],[],[],[],[],[],[]]
 
 
         batch_train_feed = {
@@ -156,6 +177,8 @@ class Brain:
             self.action_selected:np.array(batch[2], dtype=np.float32),
             self.spatial_action_selected:np.array(batch[3], dtype=np.float32),
             self.advantage:np.array(batch[4], dtype=np.float32),
+            self.hStateInput:np.array(batch[5], dtype=np.float32),
+            self.cStateInput:np.array(batch[6], dtype=np.float32),
         }
 
         self.train(batch_train_feed)
@@ -167,7 +190,7 @@ class Brain:
         return tf.square(difference)
 
     def getEntropy(self, policy, spatial_policy, valid_spatial):
-        return tf.reduce_sum(policy * tf.log(policy + 1e-10), axis=1) + valid_spatial * tf.reduce_sum(spatial_policy * tf.log(spatial_policy + 1e-10), axis=1)
+        return tf.reduce_sum(policy * tf.log(policy + 1e-10), axis=1)# + valid_spatial * tf.reduce_sum(spatial_policy * tf.log(spatial_policy + 1e-10), axis=1)
 
     # def getMinRoachHealthLoss(self, roach_target, roach_prediction):
     #     return tf.reduce_sum(tf.square(roach_target - roach_prediction), axis=1)
@@ -194,9 +217,13 @@ class Brain:
                 tf.float32, [None, self.isize], name='info')
             self.custom_inputs = tf.placeholder(
                 tf.float32, [None, self.custom_input_size], name='custom_input')
+            self.hStateInput = tf.placeholder(
+                tf.float32, [None, self.NUM_LSTM], name='h_state_input')
+            self.cStateInput = tf.placeholder(
+                tf.float32, [None, self.NUM_LSTM], name='c_state_input')
 
 
-            self.value, self.policy, self.spatial_policy = self.model([self.screen, self.info, self.custom_inputs])
+            self.value, self.policy, self.spatial_policy, _, _ = self.model([self.screen, self.info, self.custom_inputs, self.hStateInput, self.cStateInput])
 
             # This will get the probability of choosing a valid action. Given that we force it to choose from
             # the set of valid actions. The probability of an action is the probability the policy chooses
@@ -255,13 +282,16 @@ class Brain:
             # debug graph:
             self.summary_writer.add_graph(self.session.graph)
 
-    def broadcastNonSpatial(self, nonSpatialInput):
+    def broadcast(self, nonSpatialInput):
         nonSpatialInput = K.expand_dims(nonSpatialInput, axis=1)
         nonSpatialInput = K.expand_dims(nonSpatialInput, axis=2)
         return K.tile(nonSpatialInput,(1, self.ssize, self.ssize, 1))
 
-    def Squeeze(self, x, axis = 1):
-        return K.squeeze(x, axis)
+    def expand_dims(self, x):
+        return K.expand_dims(x, 1)
+
+    def Squeeze(self, x):
+        return K.squeeze(x,axis=-1)
 
     def build_net(self, dev):
          with tf.variable_scope('a3c') and tf.device(dev):
@@ -286,24 +316,55 @@ class Brain:
 
             nonSpatialInput = Concatenate(name='nonSpatialInputConcat')([infoInput, customInput])
 
-            broadcasted = Lambda(self.broadcastNonSpatial,name='broadcasting')(nonSpatialInput)
+            broadcasted = Lambda(self.broadcast,name='broadcasting')(nonSpatialInput)
 
             combinedSpatialNonSpatial = Concatenate(name='combinedConcat')([broadcasted, conv2])
 
-            flattenSpatialNonSpatial = Flatten(name='flatten')(combinedSpatialNonSpatial)
-            fc1 = Dense(256, activation='relu',name='dense1')(flattenSpatialNonSpatial)
+            conv3 = Conv2D(1, kernel_size=1, strides=(1,1), padding='same',name='conv3')(combinedSpatialNonSpatial)
+
+            flatConv3 = Flatten(name='flatConv3')(conv3)
+
+            lstmInput = Lambda(self.expand_dims, name='lstmInput')(flatConv3)
+
+            self.NUM_LSTM = 100
+
+            hStateInput = Input(
+                shape=(self.NUM_LSTM,),
+                name='hStateInput'
+            )
+
+            cStateInput = Input(
+                shape=(self.NUM_LSTM,),
+                name='cStateInput'
+            )
+
+            lstm, hStates, cStates = LSTM(self.NUM_LSTM, return_state=True)(lstmInput, initial_state=[hStateInput, cStateInput])
+
+            fc1 = Dense(256, activation='relu',name='dense1')(lstm)
             fc2 = Dense(1, activation='linear',name='fc2')(fc1)
             value = Lambda(self.Squeeze,name='value')(fc2)
             policy = Dense(self.isize, activation='softmax',name='policy')(fc1)
-            conv3 = Conv2D(1,kernel_size=1, strides=(1,1), padding='same',name='conv3')(conv2)
-            flatConv3 = Flatten(name='flattenedConv3')(conv3)
-            spatialPolicy = Softmax(name='spatialPolicy')(flatConv3)
+
+
+            broadcastLstm = Lambda(self.broadcast, name='breadcastLstm')(lstm)
+
+            spatialLstm = Concatenate(name='spatialLstm')([conv3, broadcastLstm])
+
+            conv4 = Conv2D(1,kernel_size=1, strides=(1,1), padding='same',name='conv4')(spatialLstm)
+            flatConv4 = Flatten(name='flattenedConv3')(conv4)
+            spatialPolicy = Softmax(name='spatialPolicy')(flatConv4)
 
             self.model = Model(
-                inputs=[screenInput, infoInput, customInput],
-                outputs=[value, policy, spatialPolicy]
+                inputs=[screenInput, infoInput, customInput, hStateInput, cStateInput],
+                outputs=[value, policy, spatialPolicy, hStates, cStates]
             )
             self.model._make_predict_function()
+
+            # self.dmodel = Model(
+            #     inputs=[screenInput, infoInput, customInput, hStateInput, cStateInput],
+            #     outputs=[spatialPolicy]
+            # )
+            # self.dmodel._make_predict_function()
 
 
     def save_model(self, path, count):

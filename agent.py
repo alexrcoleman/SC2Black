@@ -27,9 +27,9 @@ class A3CAgent(object):
         self.R = 0
         self.memory = []
 
-    def act(self, obs):
-        feed = self.brain.getPredictFeedDict(obs)
-        action_p, spatial_action_p, value = self.brain.predict(feed)
+    def act(self, obs, hState, cState):
+        feed = self.brain.getPredictFeedDict(obs, hState, cState)
+        action_p, spatial_action_p, value, hS, cS = self.brain.predict(feed)
 
         # Select an action and a spatial target
         action_p = action_p.ravel()
@@ -45,8 +45,8 @@ class A3CAgent(object):
             valid_action_p = action_p[valid_actions] + 1e-12
             valid_action_p = valid_action_p / np.sum(valid_action_p)
             node_non_spatial_id = np.random.choice(np.arange(len(valid_actions)), p=valid_action_p)
-
             node_spatial_id = np.random.choice(np.arange(len(spatial_action_p)), p=spatial_action_p)
+
             # node_non_spatial_id = np.argmax(valid_action_p)
             # node_spatial_id = np.argmax(spatial_action_p)
             # if np.random.rand() < self.brain.eps and self.flags.training:
@@ -96,25 +96,25 @@ class A3CAgent(object):
         self.lastActionName = actions.FUNCTIONS[act_id].name
         self.lastActionProbs = action_p
         self.last_spatial = spatial_action_p
-        return net_act_id, actions.FunctionCall(act_id, act_args), action_one_hot, spatial_one_hot, value[0]
+        return net_act_id, actions.FunctionCall(act_id, act_args), action_one_hot, spatial_one_hot, value[0], hS[0], cS[0]
 
     def discount(self, x, gamma):
         return scipy.signal.lfilter([1], [1, -gamma], x[::-1], axis=0)[::-1]
 
     # train_feed, p_feed, smask
-    def train(self, timestep, action_onehot, spatial_onehot, value, next_timestep, act, act_id):
+    def train(self, timestep, action_onehot, spatial_onehot, value, next_timestep, act, act_id, last_hS, last_cS, hState, cState):
         brain = self.brain
         feature_dict = brain.getTrainFeedDict(timestep, act, act_id)
-        self.memory.append((timestep.reward, feature_dict, action_onehot, spatial_onehot, value))
+        self.memory.append((timestep.reward, feature_dict, action_onehot, spatial_onehot, value, last_hS, last_cS))
         if len(self.memory) >= brain.N_STEP_RETURN or (next_timestep.last() and len(self.memory) > 0):
             memory = self.memory
             r = 0
             v = 0
             if not next_timestep.last():
-                _, _, v = brain.predict(brain.getPredictFeedDict(next_timestep))
+                _, _, v, _, _ = brain.predict(brain.getPredictFeedDict(next_timestep, hState, cState))
                 v = v[0]
                 r += v
-            batch = [[],[],[],[],[]]
+            batch = [[],[],[],[],[],[],[]]
 
 
             rewards = np.asarray([x[0] for x in memory])
@@ -131,6 +131,8 @@ class A3CAgent(object):
             batch[2] = [np.asarray(x[2]) for x in memory]
             batch[3] = [np.asarray(x[3]) for x in memory]
             batch[4] = batch_adv.tolist()
+            batch[5] = [np.asarray(x[5]) for x in memory]
+            batch[6] = [np.asarray(x[6]) for x in memory]
 
             brain.add_train(batch)
             self.memory = []

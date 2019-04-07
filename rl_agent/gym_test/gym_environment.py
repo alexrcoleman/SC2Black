@@ -18,7 +18,7 @@ class Environment(threading.Thread):
         self.brain = brain
         self.summary_writer = summary_writer
         self.stop_signal = False
-        self.agent = A3CAgent(flags, brain, 64, name)
+        self.agent = A3CAgent(flags, brain, 32, name)
         self.lastTime = None
 
     def run(self):

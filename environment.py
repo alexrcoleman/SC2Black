@@ -19,7 +19,7 @@ class Environment(threading.Thread):
         self.max_frames = max_frames
         self.summary_writer = summary_writer
         self.stop_signal = False
-        self.agent = A3CAgent(flags, brain, 64, name)
+        self.agent = A3CAgent(flags, brain, 32, name)
         self.lastTime = None
 
     def startBench(self):
@@ -31,8 +31,8 @@ class Environment(threading.Thread):
     def run(self):
         # Sets up interaction with environment
         agent_interface_format = sc2_env.parse_agent_interface_format(
-            feature_screen=64,
-            feature_minimap=64,
+            feature_screen=32,
+            feature_minimap=16,
             use_feature_units=True)
 
         # Sets up environment
@@ -49,6 +49,8 @@ class Environment(threading.Thread):
         timestep = self.env.reset()[0]
         last_net_act_id = 0
         self.addInputs(timestep, num_frames, last_net_act_id)
+        hState = np.zeros(self.brain.NUM_LSTM)
+        cState = np.zeros(self.brain.NUM_LSTM)
         while not (self.stop_signal or self.brain.stop_signal):
             time.sleep(.00001) # yield
             #self.startBench()
@@ -63,8 +65,9 @@ class Environment(threading.Thread):
                     timestep.observation.available_actions = np.delete(
                         timestep.observation.available_actions, index)
             #self.bench("part1")
-
-            last_net_act_id, act, action_onehot, spatial_onehot, value = self.agent.act(timestep)
+            last_hS = hState
+            last_cS = cState
+            last_net_act_id, act, action_onehot, spatial_onehot, value, hState, cState = self.agent.act(timestep,hState,cState)
             #self.bench("agent")
             timestep = self.env.step([act])[0]
             #self.bench("env a")
@@ -74,7 +77,7 @@ class Environment(threading.Thread):
 
 
             if FLAGS.training:
-                self.agent.train(last_timestep, action_onehot, spatial_onehot, value, timestep, act, last_net_act_id)
+                self.agent.train(last_timestep, action_onehot, spatial_onehot, value, timestep, act, last_net_act_id, last_hS, last_cS, hState, cState)
             #self.bench("train")
             if is_done:
                 score = timestep.observation["score_cumulative"][0]
