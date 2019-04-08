@@ -107,10 +107,12 @@ def getLowestHealthRoach(obs):
             best_roach = roach
     if not best_roach is None:
         best_roach = [best_roach.y, best_roach.x]
+    else:
+        best_roach = [0,0]
     return best_roach
 
 
-use_coords = False
+use_coords = True
 def preprocess_screen(screen):
     layers = []
     for i in useful_screens:

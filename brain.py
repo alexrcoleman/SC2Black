@@ -36,7 +36,7 @@ class Brain:
         self.stop_signal = False
 
         self.lock_queue = threading.Lock()
-        self.train_queue = [[], [], [], [], [], [], []]
+        self.train_queue = [[], [], [], [], [], [], [], []]
 
 
         self.counter_lock = threading.Lock()
@@ -108,7 +108,7 @@ class Brain:
 
     def predict(self, feed):
         with self.session.as_default():
-            v, policy, spatialPolicy, hS, cS = self.model.predict([
+            v, policy, spatialPolicy, hS, cS, _ = self.model.predict([
                 feed[self.screen],
                 feed[self.info],
                 feed[self.custom_inputs],
@@ -116,15 +116,6 @@ class Brain:
                 feed[self.cStateInput],
             ])
 
-            # conv1 = self.dmodel.predict([
-            #     feed[self.screen],
-            #     feed[self.info],
-            #     feed[self.custom_inputs],
-            #     feed[self.hStateInput],
-            #     feed[self.cStateInput],
-            # ])
-            # print(np.array_equal(conv1, self.debug))
-            # self.debug = conv1
             return policy, spatialPolicy, v, hS, cS
 
 
@@ -164,7 +155,7 @@ class Brain:
                 return
 
             batch = self.train_queue
-            self.train_queue = [[],[],[],[],[],[],[]]
+            self.train_queue = [[],[],[],[],[],[],[],[]]
 
 
         batch_train_feed = {
@@ -179,6 +170,7 @@ class Brain:
             self.advantage:np.array(batch[4], dtype=np.float32),
             self.hStateInput:np.array(batch[5], dtype=np.float32),
             self.cStateInput:np.array(batch[6], dtype=np.float32),
+            self.roach_location:np.array(batch[7], dtype=np.float32)
         }
 
         self.train(batch_train_feed)
@@ -192,8 +184,8 @@ class Brain:
     def getEntropy(self, policy, spatial_policy, valid_spatial):
         return tf.reduce_sum(policy * tf.log(policy + 1e-10), axis=1)# + valid_spatial * tf.reduce_sum(spatial_policy * tf.log(spatial_policy + 1e-10), axis=1)
 
-    # def getMinRoachHealthLoss(self, roach_target, roach_prediction):
-    #     return tf.reduce_sum(tf.square(roach_target - roach_prediction), axis=1)
+    def getMinRoachLoss(self, roach_target, roach_prediction):
+        return K.categorical_crossentropy(roach_target,roach_prediction)
 
     def build_model(self, dev):
         with tf.variable_scope('a3c') and tf.device(dev):
@@ -221,10 +213,11 @@ class Brain:
                 tf.float32, [None, self.NUM_LSTM], name='h_state_input')
             self.cStateInput = tf.placeholder(
                 tf.float32, [None, self.NUM_LSTM], name='c_state_input')
+            self.roach_location = tf.placeholder(
+                tf.float32, [None, self.ssize ** 2], name='roach_location'
+            )
 
-
-            self.value, self.policy, self.spatial_policy, _, _ = self.model([self.screen, self.info, self.custom_inputs, self.hStateInput, self.cStateInput])
-
+            self.value, self.policy, self.spatial_policy, _, _, self.roachPrediction = self.model([self.screen, self.info, self.custom_inputs, self.hStateInput, self.cStateInput])
             # This will get the probability of choosing a valid action. Given that we force it to choose from
             # the set of valid actions. The probability of an action is the probability the policy chooses
             # divided by the probability of a valid action
@@ -249,12 +242,16 @@ class Brain:
             value_loss = self.getValueLoss(self.value_target - self.value)
             entropy = self.getEntropy(
                 self.policy, self.spatial_policy, self.valid_spatial_action)
+            roachLoss = self.getMinRoachLoss(
+                self.roach_location, self.roachPrediction
+            )
 
-            loss = tf.reduce_mean(policy_loss + value_loss * .5 + entropy * .01)
+
+            loss = tf.reduce_mean(policy_loss + value_loss * .5 + entropy * .01 + .5 * roachLoss)
             # Build the optimizer
             global_step = tf.Variable(0)
             learning_rate_decayed = tf.train.exponential_decay(self.learning_rate,
-            global_step,10000, .95, staircase=True)
+                                                               global_step,10000, .95)
 
             opt = tf.train.AdamOptimizer(self.learning_rate)
             grads, vars = zip(*opt.compute_gradients(loss))
@@ -274,6 +271,8 @@ class Brain:
                     'advantage', tf.reduce_mean(self.advantage)))
                 summary.append(tf.summary.scalar(
                     'loss', tf.reduce_mean(loss)))
+                summary.append(tf.summary.scalar(
+                    'roachLoss', tf.reduce_mean(roachLoss)))
                 self.summary_op = tf.summary.merge(summary)
             else:
                 self.summary_op = []
@@ -354,17 +353,15 @@ class Brain:
             flatConv4 = Flatten(name='flattenedConv3')(conv4)
             spatialPolicy = Softmax(name='spatialPolicy')(flatConv4)
 
+            conv5 = Conv2D(1, kernel_size=1, strides=(1,1), padding='same',name='conv5')(spatialLstm)
+            flatConv5 = Flatten(name='flattenedConv5')(conv5)
+            bestRoach = Softmax(name='bestRoach')(flatConv5)
+
             self.model = Model(
                 inputs=[screenInput, infoInput, customInput, hStateInput, cStateInput],
-                outputs=[value, policy, spatialPolicy, hStates, cStates]
+                outputs=[value, policy, spatialPolicy, hStates, cStates, bestRoach]
             )
             self.model._make_predict_function()
-
-            # self.dmodel = Model(
-            #     inputs=[screenInput, infoInput, customInput, hStateInput, cStateInput],
-            #     outputs=[spatialPolicy]
-            # )
-            # self.dmodel._make_predict_function()
 
 
     def save_model(self, path, count):
