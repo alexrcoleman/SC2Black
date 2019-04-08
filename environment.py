@@ -6,6 +6,7 @@ import threading
 import utils as U
 import tensorflow as tf
 import time
+from pysc2.lib import features
 
 
 class Environment(threading.Thread):
@@ -91,12 +92,25 @@ class Environment(threading.Thread):
                 break
 
     def addInputs(self, timestep, num_frames, last_net_act_id):
+        FLAGS = self.flags
         norm_step = num_frames / self.max_frames
         last_act_onehot = np.zeros(
             [len(U.useful_actions)], dtype=np.float32)
         last_act_onehot[last_net_act_id] = 1
         timestep.observation.custom_inputs = np.concatenate(
             [[norm_step], last_act_onehot], axis=0)
+        if FLAGS.kiting:
+            kiteReward = U.KiteEnemies(timestep)
+            timestep.observation.rewardMod = timestep.reward + kiteReward
+            marines = [
+                unit for unit in timestep.observation.feature_units if unit.alliance == features.PlayerRelative.SELF]
+            roaches = [unit for unit in timestep.observation.feature_units if unit.alliance ==
+                features.PlayerRelative.ENEMY]
+            for marine in marines:
+                for roach in roaches:
+                    dist = np.sqrt((marine.x - roach.x)**2 + (marine.y - roach.y)**2) 
+                    print("Distance: " + str(dist))
+                    
 
     def stop(self):
         self.stop_signal = True
