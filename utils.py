@@ -137,6 +137,36 @@ def preprocess_screen(screen):
 
     return np.concatenate(layers, axis=0)
 
+def MarineRange(marine, enemy):
+    dist = np.sqrt((marine.x - enemy.x)**2 + (marine.y - enemy.y)**2)
+    if dist <= 9:
+        return True
+    else:
+        return False
+
+def EnemyRange(marine, enemy):
+    dist = np.sqrt((marine.x - enemy.x)**2 + (marine.y - enemy.y)**2) 
+    #Largest enemy range we're dealing with is a roach, with a range of approx 6 (found by test)
+    if dist > 6.5:
+        return False
+    else:
+        return True
+
+def KiteEnemies(obs):
+    rewardBonus = 0
+    marines = [
+        unit for unit in obs.observation.feature_units if unit.alliance == features.PlayerRelative.SELF]
+    roaches = [unit for unit in obs.observation.feature_units if unit.alliance ==
+               features.PlayerRelative.ENEMY]
+    for marine in marines:
+        for roach in roaches:
+            #Check if the marine is in range to hit the roach without the roach being in range to hit the marine back
+            if(MarineRange(marine, roach) and not (EnemyRange(marine, roach))):
+                #For each enemy a marine is safely kiting, gain 0.02 reward: For 10 marines and 4 roaches this means in a perfect world this is +0.8
+                rewardBonus = rewardBonus + 0.02
+    return rewardBonus
+    
+
 def screen_channel():
     c = 0
     if use_coords:

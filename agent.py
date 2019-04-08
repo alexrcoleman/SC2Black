@@ -105,7 +105,7 @@ class A3CAgent(object):
     def train(self, timestep, action_onehot, spatial_onehot, value, next_timestep, act, act_id, last_hS, last_cS, hState, cState, roachLoc):
         brain = self.brain
         feature_dict = brain.getTrainFeedDict(timestep, act, act_id)
-        self.memory.append((timestep.reward, feature_dict, action_onehot, spatial_onehot, value, last_hS, last_cS, roachLoc))
+        self.memory.append((timestep.observation.rewardMod, feature_dict, action_onehot, spatial_onehot, value, last_hS, last_cS, roachLoc))
         if len(self.memory) >= brain.N_STEP_RETURN or (next_timestep.last() and len(self.memory) > 0):
             memory = self.memory
             r = 0

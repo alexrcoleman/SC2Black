@@ -21,6 +21,7 @@ from brain import Brain
 from optimizer import Optimizer
 
 FLAGS = flags.FLAGS
+flags.DEFINE_bool("kiting", True, "Reward marine for kiting back against roaches.")
 flags.DEFINE_bool("training", True, "Whether to train agents.")
 flags.DEFINE_bool("continuation", False, "Continuously training.")
 flags.DEFINE_float("learning_rate", 1e-4, "Learning rate for training.")
