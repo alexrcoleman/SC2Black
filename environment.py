@@ -110,10 +110,11 @@ class Environment(threading.Thread):
                 unit for unit in timestep.observation.feature_units if unit.alliance == features.PlayerRelative.SELF]
             roaches = [unit for unit in timestep.observation.feature_units if unit.alliance ==
                 features.PlayerRelative.ENEMY]
-            for marine in marines:
-                for roach in roaches:
-                    dist = np.sqrt((marine.x - roach.x)**2 + (marine.y - roach.y)**2) 
-                    print("Distance: " + str(dist))
+            if marines and roaches:
+                for marine in marines:
+                    for roach in roaches:
+                        dist = np.sqrt((marine.x - roach.x)**2 + (marine.y - roach.y)**2) 
+                        print("Distance: " + str(dist))
                     
 
     def stop(self):
