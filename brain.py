@@ -13,8 +13,12 @@ from tensorflow.keras.layers import Concatenate
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.layers import Flatten
 from tensorflow.keras.layers import Input
+from tensorflow.keras.layers import RepeatVector
 from tensorflow.keras.layers import Permute
 from tensorflow.keras.layers import Softmax
+from tensorflow.keras.layers import Reshape
+from tensorflow.keras.layers import Multiply
+from tensorflow.keras.layers import Conv1D
 from tensorflow.keras.models import Model
 from tensorflow.python.keras.layers import Lambda;
 import tensorflow.keras.backend as K
@@ -72,7 +76,11 @@ class Brain:
             self.info: info,
             self.custom_inputs: custom_inputs,
             self.hStateInput: hState,
-            self.cStateInput: cState }
+            self.cStateInput: cState,
+            self.xB:np.array(U.makeX(len(screen),self.ssize)),
+            self.yB:np.array(U.makeY(len(screen),self.ssize)),
+            self.divB:np.array(U.makeDiv(len(screen), (self.ssize//self.numSplits)**-.5))
+            }
 
     def getTrainFeedDict(self, obs, action, attributed_act_id):
         screen = np.array(obs.observation['feature_screen'], dtype=np.float32)
@@ -114,6 +122,9 @@ class Brain:
                 feed[self.custom_inputs],
                 feed[self.hStateInput],
                 feed[self.cStateInput],
+                feed[self.xB],
+                feed[self.yB],
+                feed[self.divB]
             ])
 
             return policy, spatialPolicy, v, hS, cS
@@ -170,7 +181,10 @@ class Brain:
             self.advantage:np.array(batch[4], dtype=np.float32),
             self.hStateInput:np.array(batch[5], dtype=np.float32),
             self.cStateInput:np.array(batch[6], dtype=np.float32),
-            self.roach_location:np.array(batch[7], dtype=np.float32)
+            self.roach_location:np.array(batch[7], dtype=np.float32),
+            self.xB:np.array(U.makeX(len(batch[0]), self.ssize)),
+            self.yB:np.array(U.makeY(len(batch[0]), self.ssize)),
+            self.divB:np.array(U.makeDiv(len(batch[0]), (self.ssize//self.numSplits)**-.5)),
         }
 
         self.train(batch_train_feed)
@@ -216,8 +230,17 @@ class Brain:
             self.roach_location = tf.placeholder(
                 tf.float32, [None, self.ssize ** 2], name='roach_location'
             )
+            self.xB = tf.placeholder(
+                tf.float32, [None, 32, 32 ,1], name='xB'
+            )
+            self.yB = tf.placeholder(
+                tf.float32, [None, 32, 32 ,1], name='yB'
+            )
+            self.divB = tf.placeholder(
+                tf.float32, [None], name='divB'
+            )
 
-            self.value, self.policy, self.spatial_policy, _, _, self.roachPrediction = self.model([self.screen, self.info, self.custom_inputs, self.hStateInput, self.cStateInput])
+            self.value, self.policy, self.spatial_policy, _, _, self.roachPrediction = self.model([self.screen, self.info, self.custom_inputs, self.hStateInput, self.cStateInput, self.xB, self.yB, self.divB])
             # This will get the probability of choosing a valid action. Given that we force it to choose from
             # the set of valid actions. The probability of an action is the probability the policy chooses
             # divided by the probability of a valid action
@@ -255,7 +278,7 @@ class Brain:
 
             opt = tf.train.AdamOptimizer(self.learning_rate)
             grads, vars = zip(*opt.compute_gradients(loss))
-            grads, glob_norm = tf.clip_by_global_norm(grads, 40.0)
+            grads, glob_norm = tf.clip_by_global_norm(grads, 5.0)
             self.train_op = opt.apply_gradients(zip(grads, vars), global_step=global_step)
             if self.flags.use_tensorboard:
                 summary = []
@@ -289,8 +312,31 @@ class Brain:
     def expand_dims(self, x):
         return K.expand_dims(x, 1)
 
+    def expand_dims_last(self, x):
+        return K.expand_dims(x, -1)
+
     def Squeeze(self, x):
         return K.squeeze(x,axis=-1)
+
+    def matMultT(self, x):
+        return K.batch_dot(x[0],K.permute_dimensions(K.transpose(x[1]), (2, 0, 1)))
+    def matMult(self, x):
+        return K.batch_dot(x[0], x[1])
+
+    def makeBatch(self, x):
+        return K.tile(x[1], x[0])
+    """
+    def split_heads(x, num_heads):
+        Split channels (dimension 2) into multiple heads (becomes dimension 1).
+        Args:
+            x: a Tensor with shape [batch, length, channels]
+            num_heads: an integer
+        Returns:
+            a Tensor with shape [batch, num_heads, length, channels / num_heads]
+
+        return tf.transpose(split_last_dimension(x, num_heads), [0, 2, 1, 3])
+    """
+
 
     def build_net(self, dev):
          with tf.variable_scope('a3c') and tf.device(dev):
@@ -339,26 +385,78 @@ class Brain:
 
             lstm, hStates, cStates = LSTM(self.NUM_LSTM, return_state=True)(lstmInput, initial_state=[hStateInput, cStateInput])
 
-            fc1 = Dense(256, activation='relu',name='dense1')(lstm)
-            fc2 = Dense(1, activation='linear',name='fc2')(fc1)
-            value = Lambda(self.Squeeze,name='value')(fc2)
-            policy = Dense(self.isize, activation='softmax',name='policy')(fc1)
-
-
             broadcastLstm = Lambda(self.broadcast, name='breadcastLstm')(lstm)
 
             spatialLstm = Concatenate(name='spatialLstm')([conv3, broadcastLstm])
 
-            conv4 = Conv2D(1,kernel_size=1, strides=(1,1), padding='same',name='conv4')(spatialLstm)
+            # add in the coordinates
+            # xCords = K.constant(
+            #     [[[[x/self.ssize,] for x in range(self.ssize)] for _ in range(self.ssize)],],
+            #     dtype=tf.float32,
+            # )
+            # yCords = K.constant(
+            #     [[[[y/self.ssize,] for _ in range(self.ssize)] for y in range(self.ssize)],],
+            #     dtype=tf.float32,
+            # )
+            #
+            # xCords = Input(tensor = xCords)
+            # yCords = Input(tensor = yCords)
+            #
+            #
+            # xB =  Lambda(self.makeBatch)([(K.shape(screenInput)[0],1,1,1),xCords])
+            # yB =  Lambda(self.makeBatch)([(K.shape(screenInput)[0],1,1,1),yCords])
+
+            xB = Input(shape=(32,32,1), name='xb')
+            yB = Input(shape=(32,32,1), name='yb')
+
+            coordLstm = Concatenate(name='coordLstm')([spatialLstm, xB, yB])
+
+            # unravel the width dimension new shape = [None, 32^2, depth]
+            unraveled = Reshape((self.ssize**2, self.NUM_LSTM + 2 + 1), name='unraveled')(coordLstm)
+            # run 3 conv1d for q, k, v.
+            q = Conv1D(1, kernel_size=1, strides=(1,), name='qConv')(unraveled)
+            v = Conv1D(1, kernel_size=1, strides=(1,), name='vConv')(unraveled)
+            k = Conv1D(1, kernel_size=1, strides=(1,), name='kConv')(unraveled)
+
+            # must divide ssize^2
+            self.numSplits = 8
+
+            # split heads
+            qSplit = Reshape((self.numSplits,(self.ssize**2)//self.numSplits), name='qSplit')(q)
+            vSplit = Reshape((self.numSplits,(self.ssize**2)//self.numSplits), name='vSplit')(v)
+            kSplit = Reshape((self.numSplits,(self.ssize**2)//self.numSplits), name='kSplit')(k)
+
+            # run ops
+            # div = K.constant([(self.ssize/self.numSplits)**-.5], dtype=tf.float32)
+            # div = Input(tensor=div)
+            # divB = Lambda(self.makeBatch)([(K.shape(screenInput)[0],),div])
+            divB = Input(shape=(), name ='div')
+            qSplit = Multiply(name='dividedQ')([qSplit, divB])
+
+            qkMult = Lambda(self.matMultT, name='qkMult')([qSplit,kSplit])
+            weights = Softmax(name='weights')(qkMult)
+            attentionSplit = Lambda(self.matMult, name='attentionSplit')([weights, vSplit])
+            # concat heads
+
+            attention = Reshape((self.ssize**2,), name='attention')(attentionSplit)
+
+            fc1 = Dense(256, activation='relu',name='dense1')(attention)
+            fc2 = Dense(1, activation='linear',name='fc2')(fc1)
+            value = Lambda(self.Squeeze,name='value')(fc2)
+            policy = Dense(self.isize, activation='softmax',name='policy')(fc1)
+
+            attentionSpatial = Reshape((self.ssize, self.ssize), name='attentionSpatial')(attention)
+            attentionSpatial = Lambda(self.expand_dims_last)(attentionSpatial)
+            conv4 = Conv2D(1,kernel_size=1, strides=(1,1), padding='same',name='conv4')(attentionSpatial)
             flatConv4 = Flatten(name='flattenedConv3')(conv4)
             spatialPolicy = Softmax(name='spatialPolicy')(flatConv4)
 
-            conv5 = Conv2D(1, kernel_size=1, strides=(1,1), padding='same',name='conv5')(spatialLstm)
+            conv5 = Conv2D(1, kernel_size=1, strides=(1,1), padding='same',name='conv5')(attentionSpatial)
             flatConv5 = Flatten(name='flattenedConv5')(conv5)
             bestRoach = Softmax(name='bestRoach')(flatConv5)
 
             self.model = Model(
-                inputs=[screenInput, infoInput, customInput, hStateInput, cStateInput],
+                inputs=[screenInput, infoInput, customInput, hStateInput, cStateInput, xB, yB, divB],
                 outputs=[value, policy, spatialPolicy, hStates, cStates, bestRoach]
             )
             self.model._make_predict_function()

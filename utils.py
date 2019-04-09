@@ -32,7 +32,7 @@ useful_actions = [
     7,  # select_army
     12,  # Attack_screen
     # 274, # HoldPosition_quick
-    # 331,  # Move_screen
+    331,  # Move_screen
     # 333, # Patrol_screen
     # 453, # Stop_quick
 ]
@@ -112,7 +112,17 @@ def getLowestHealthRoach(obs):
     return best_roach
 
 
-use_coords = True
+use_coords = False
+
+def makeX(b, ssize):
+    return [[[[x] for x in range(ssize)] for _ in range(ssize)] for _ in range(b)]
+
+def makeY(b, ssize):
+    return [[[[y] for _ in range(ssize)] for y in range(ssize)] for _ in range(b)]
+
+def makeDiv(b, val):
+    return [val for _ in range(b)]
+
 def preprocess_screen(screen):
     layers = []
     for i in useful_screens:
@@ -139,18 +149,12 @@ def preprocess_screen(screen):
 
 def MarineRange(marine, enemy):
     dist = np.sqrt((marine.x - enemy.x)**2 + (marine.y - enemy.y)**2)
-    if dist <= 9:
-        return True
-    else:
-        return False
+    return dist <= 9
 
 def EnemyRange(marine, enemy):
-    dist = np.sqrt((marine.x - enemy.x)**2 + (marine.y - enemy.y)**2) 
+    dist = np.sqrt((marine.x - enemy.x)**2 + (marine.y - enemy.y)**2)
     #Largest enemy range we're dealing with is a roach, with a range of approx 6 (found by test)
-    if dist > 6.5:
-        return False
-    else:
-        return True
+    return dist <= 6.5
 
 def KiteEnemies(obs):
     rewardBonus = 0
@@ -165,7 +169,7 @@ def KiteEnemies(obs):
                 #For each enemy a marine is safely kiting, gain 0.02 reward: For 10 marines and 4 roaches this means in a perfect world this is +0.8
                 rewardBonus = rewardBonus + 0.02
     return rewardBonus
-    
+
 
 def screen_channel():
     c = 0

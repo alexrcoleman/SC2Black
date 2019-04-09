@@ -63,7 +63,8 @@ class Brain:
         return {
             self.input: input,
             self.hStateInput: hState,
-            self.cStateInput: cState}
+            self.cStateInput: cState,
+        }
 
     def predict(self, feed):
         with self.session.as_default():
@@ -71,6 +72,9 @@ class Brain:
                 feed[self.input],
                 feed[self.hStateInput],
                 feed[self.cStateInput],
+                feed[self.xB],
+                feed[self.yB],
+                feed[self.divB]
             ])
             return policy, value, hs, cs
 
@@ -124,7 +128,7 @@ class Brain:
             self.action_selected:np.array(batch[2], dtype=np.float32),
             self.advantage:np.array(batch[3], dtype=np.float32),
             self.hStateInput:np.array(batch[4], dtype=np.float32),
-            self.cStateInput:np.array(batch[5], dtype=np.float32)
+            self.cStateInput:np.array(batch[5], dtype=np.float32),
         }
         self.train(batch_train_feed)
 
