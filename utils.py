@@ -158,12 +158,14 @@ def KiteEnemies(obs):
         unit for unit in obs.observation.feature_units if unit.alliance == features.PlayerRelative.SELF]
     roaches = [unit for unit in obs.observation.feature_units if unit.alliance ==
                features.PlayerRelative.ENEMY]
-    for marine in marines:
-        for roach in roaches:
-            #Check if the marine is in range to hit the roach without the roach being in range to hit the marine back
-            if(MarineRange(marine, roach) and not (EnemyRange(marine, roach))):
-                #For each enemy a marine is safely kiting, gain 0.02 reward: For 10 marines and 4 roaches this means in a perfect world this is +0.8
-                rewardBonus = rewardBonus + 0.02
+    #ensure marines and roaches are both non empty
+    if marines and roaches:
+        for marine in marines:
+            for roach in roaches:
+                #Check if the marine is in range to hit the roach without the roach being in range to hit the marine back
+                if(MarineRange(marine, roach) and not (EnemyRange(marine, roach))):
+                    #For each enemy a marine is safely kiting, gain 0.02 reward: For 10 marines and 4 roaches this means in a perfect world this is +0.8
+                    rewardBonus = rewardBonus + 0.02
     return rewardBonus
     
 
