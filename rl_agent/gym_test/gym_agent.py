@@ -33,10 +33,11 @@ class A3CAgent(object):
             return EPS_STOP
         else:
             return EPS_START + frames * (EPS_STOP - EPS_START) / EPS_STEPS	# linearly interpolate
-    def act(self, observation):
+
+    def act(self, observation, hState, cState):
         global frames; frames = frames + 1
-        feed = self.brain.getPredictFeedDict(observation)
-        action, value = self.brain.predict(feed)
+        feed = self.brain.getPredictFeedDict(observation, hState, cState)
+        action, value , hs, cs= self.brain.predict(feed)
         action = action.ravel()
         # Take the node highest with the most weight
         # action_id = np.argmax(action)
@@ -49,25 +50,25 @@ class A3CAgent(object):
         self.lastValue = value
         self.lastActionProbs = action
         one_hot = [int(i == action_id) for i in range(len(action))]
-        return action_id, one_hot, value[0]
+        return action_id, one_hot, value[0], hs[0], cs[0]
 
 
     def discount(self, x, gamma):
         return scipy.signal.lfilter([1], [1, -gamma], x[::-1], axis=0)[::-1]
 
     # train_feed, p_feed, smask
-    def train(self, last_observation, reward, action_onehot, value, observation, done):
-        self.memory.append((reward, last_observation, action_onehot, value))
+    def train(self, last_observation, reward, action_onehot, value, observation, done, lastH, lastC, hS, cS):
+        self.memory.append((reward, last_observation, action_onehot, value, lastH, lastC))
         brain = self.brain
         if len(self.memory) >= brain.N_STEP_RETURN or (done and len(self.memory) > 0):
             memory = self.memory
             r = 0
             v = 0
             if not done:
-                _, v = brain.predict(brain.getPredictFeedDict(observation))
+                _, v, _, _ = brain.predict(brain.getPredictFeedDict(observation,hS,cS))
                 v = v[0]
                 r += v
-            batch = [[],[],[],[]]
+            batch = [[],[],[],[],[],[]]
 
             rewards = np.asarray([x[0] for x in memory])
             values = np.asarray([x[3] for x in memory] + [v])
@@ -80,6 +81,8 @@ class A3CAgent(object):
             batch[1] = [np.asarray(brain.preprocess(x[1])) for x in memory]
             batch[2] = [np.asarray(x[2]) for x in memory]
             batch[3] = batch_adv.tolist()
+            batch[4] = [np.asarray(x[4]) for x in memory]
+            batch[5] = [np.asarray(x[5]) for x in memory]
 
             brain.add_train(batch)
             self.memory = []
