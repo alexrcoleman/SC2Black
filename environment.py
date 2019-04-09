@@ -115,7 +115,8 @@ class Environment(threading.Thread):
                     for roach in roaches:
                         dist = np.sqrt((marine.x - roach.x)**2 + (marine.y - roach.y)**2) 
                         print("Distance: " + str(dist))
-                    
+        else:
+            timestep.observation.rewardMod = timestep.reward
 
     def stop(self):
         self.stop_signal = True
