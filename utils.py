@@ -98,17 +98,18 @@ def getLowestHealthRoach(obs):
     best_roach = None
     minHealth = 1000000
     minDist = 0
-    for roach in roaches:
-        hp = roach.health
-        dist = np.sqrt((marine_xy[0] - roach.x)**2 + (marine_xy[1] - roach.y)**2)
-        if hp < minHealth or (hp == minHealth and dist < minDist):
-            minHealth = hp
-            minDist = dist
-            best_roach = roach
-    if not best_roach is None:
-        best_roach = [best_roach.y, best_roach.x]
-    else:
-        best_roach = [0,0]
+    if roaches:
+       for roach in roaches:
+           hp = roach.health
+           dist = np.sqrt((marine_xy[0] - roach.x)**2 + (marine_xy[1] - roach.y)**2)
+           if hp < minHealth or (hp == minHealth and dist < minDist):
+               minHealth = hp
+               minDist = dist
+               best_roach = roach
+       if not best_roach is None:
+           best_roach = [best_roach.y, best_roach.x]
+       else:
+           best_roach = [0,0]
     return best_roach
 
 
