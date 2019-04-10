@@ -6,16 +6,20 @@ import numpy as np
 import threading
 import time
 
+import sonnet as snt
+
 from tensorflow.keras.layers import Conv2D
 from tensorflow.keras.layers import GRU
 from tensorflow.keras.layers import LSTM
 from tensorflow.keras.layers import Concatenate
 from tensorflow.keras.layers import Dense
+from tensorflow.keras.layers import Add
 from tensorflow.keras.layers import Flatten
 from tensorflow.keras.layers import Input
 from tensorflow.keras.layers import RepeatVector
 from tensorflow.keras.layers import Permute
 from tensorflow.keras.layers import Softmax
+from tensorflow.keras.layers import BatchNormalization
 from tensorflow.keras.layers import Reshape
 from tensorflow.keras.layers import Multiply
 from tensorflow.keras.layers import Conv1D
@@ -304,10 +308,10 @@ class Brain:
             # debug graph:
             self.summary_writer.add_graph(self.session.graph)
 
-    def broadcast(self, nonSpatialInput):
-        nonSpatialInput = K.expand_dims(nonSpatialInput, axis=1)
-        nonSpatialInput = K.expand_dims(nonSpatialInput, axis=2)
-        return K.tile(nonSpatialInput,(1, self.ssize, self.ssize, 1))
+    def broadcast(self, x):
+        x[0] = K.expand_dims(x[0], axis=1)
+        x[0] = K.expand_dims(x[0], axis=2)
+        return K.tile(x[0],(1, x[1], x[1], 1))
 
     def expand_dims(self, x):
         return K.expand_dims(x, 1)
@@ -318,149 +322,119 @@ class Brain:
     def Squeeze(self, x):
         return K.squeeze(x,axis=-1)
 
-    def matMultT(self, x):
-        return K.batch_dot(x[0],K.permute_dimensions(K.transpose(x[1]), (2, 0, 1)))
-    def matMult(self, x):
-        return K.batch_dot(x[0], x[1])
+    def conv2DLSTM(self,x):
+         return snt.Conv2DLSTM(input_shape=(8,8,96+128),output_channels=96,kernel_shape=(4,4))(x[0], x[1])
 
-    def makeBatch(self, x):
-        return K.tile(x[1], x[0])
-    """
-    def split_heads(x, num_heads):
-        Split channels (dimension 2) into multiple heads (becomes dimension 1).
-        Args:
-            x: a Tensor with shape [batch, length, channels]
-            num_heads: an integer
-        Returns:
-            a Tensor with shape [batch, num_heads, length, channels / num_heads]
+    def splitQKV(self,x):
+        x = tf.transpose(x, [0,2,1,3])
+        q,k,v = tf.split(x, [self.key_size, self.key_size, self.head_size], -1)
+        q *= self.key_size ** -.05
+        return q, k, v
 
-        return tf.transpose(split_last_dimension(x, num_heads), [0, 2, 1, 3])
-    """
+    def tf_matmul(self,x):
+        return tf.matmul(x[0],x[1],transpose_b=x[2])
+
+    def build_net(self,dev):
+        with tf.variable_scope('a3c') and tf.device(dev):
+           screenInput = Input(
+               shape=(U.screen_channel(), self.ssize, self.ssize),
+               name='screenInput',
+           )
+
+           input3D = Permute((2,3,1))(screenInput)
+           for i in range(2):
+               input3D = Conv2D(32, kernel_size=4, strides=(2,2), padding='same')(input3D)
+               input3D = Conv2D(64, kernel_size=3, strides=(1,1), padding='same')(input3D)
+               input3D = Conv2D(94, kernel_size=3, strides=(1,1), padding='same')(input3D)
+
+           infoInput = Input(
+               shape=(self.isize,),
+               name='infoInput',
+           )
+
+           customInput = Input(
+               shape=(self.custom_input_size,),
+               name='customInput',
+           )
+
+           input2D = Concatenate(name='nonSpatialInputConcat')([infoInput, customInput])
+           input2D = Dense(128, activation='relu')(input2D)
+           input2D = Dense(64, activation='relu')(input2D)
+
+           broadcasted = Lambda(self.broadcast,name='broadcasting')([input2D, 8])
+
+           combinedSpatialNonSpatial = Concatenate(name='combinedConcat')([broadcasted, input3D])
+
+           self.NUM_LSTM = 96
+
+           stateInput = Input(
+               shape=(self.NUM_LSTM,),
+               name='stateInput'
+           )
+
+           output2d, state = Lambda(self.conv2DLSTM)([combinedSpatialNonSpatial, stateInput])
+
+           xB = Input(shape=(32,32,1), name='xb')
+           yB = Input(shape=(32,32,1), name='yb')
+
+           coordLstm = Concatenate(name='coordLstm')([output2d, xB, yB])
+
+           self.num_heads = 2
+           self.head_size = 32
+           self.key_size = 32
+
+           # unravel the width dimension new shape = [None, 32^2, depth]
+           unraveled = Flatten()(coordLstm)
+           self.qkv_size = self.head_size + self.key_size * 2
+           self.total_size = self.qkv_size * self.num_heads
+           qkv = Conv1D(self.total_size, kernel_size=1, strides=(1,), activation='linear')(unraveled)
+           qkv = BatchNormalization()(qkv)
+           qkv = Reshape((8*8,self.num_heads,self.qkv_size))
+
+           q, k, v = Lambda(self.splitQKV)(qkv)
+
+           dot = Lambda(self.tf_matmul)([q,k,True])
+           weights = Softmax()(dot)
+           output = Lambda(self.tf_matmul)([weights, v, False])
+
+           output_t = Permute((2,1,3))(output)
+
+           attention = Reshape((8*8,output_t.shape[2] * output_t.shape[3]))(output_t)
+           attention = Conv1D(coordLstm.shape[3], kernel_size=1, strides=(1,), activation='relu')(attention)
+           attention = Conv1D(coordLstm.shape[3], kernel_size=1, strides=(1,), activation='relu')(attention)
 
 
-    def build_net(self, dev):
-         with tf.variable_scope('a3c') and tf.device(dev):
-            screenInput = Input(
-                shape=(U.screen_channel(), self.ssize, self.ssize),
-                name='screenInput',
-            )
+           final = Add()([attention, coordLstm])
 
-            permutedScreenInput = Permute((2,3,1))(screenInput)
-            conv1 = Conv2D(16, kernel_size=5, strides=(1,1), padding='same',name='conv1')(permutedScreenInput)
-            conv2 = Conv2D(32, kernel_size=3, strides=(1,1), padding='same',name='conv2')(conv1)
+           nonSpatial = MaxPool2D(pool_size=(8,8))(final)
+           nonSpatial = Squeeze()(nonSpatial)
+           nonSpatial = Concatenate()([nonSpatial, input2D])
 
-            infoInput = Input(
-                shape=(self.isize,),
-                name='infoInput',
-            )
 
-            customInput = Input(
-                shape=(self.custom_input_size,),
-                name='customInput',
-            )
+           vfc = Dense(256, activation='relu',name='dense1')(nonSpatial)
+           vfc = Dense(1, activation='linear',name='fc2')(vfc)
+           value = Lambda(self.Squeeze,name='value')(vfc)
 
-            nonSpatialInput = Concatenate(name='nonSpatialInputConcat')([infoInput, customInput])
+           pfc = Dense(256, activation='relu',name='dense1')(nonSpatial)
+           policy_logits = Dense(self.isize, activation='none',name='policy')(pfc)
+           policy = Softmax()(policy_logits)
 
-            broadcasted = Lambda(self.broadcast,name='broadcasting')(nonSpatialInput)
+           spatialOut = Conv2DTranspose(32,kernel_size=4,strides=(2,2))()
+           spatialOut = Conv2DTranspose(16,kernel_size=4,strides=(2,2))()
 
-            combinedSpatialNonSpatial = Concatenate(name='combinedConcat')([broadcasted, conv2])
+           broadcastPolicy = Lambda(self.broadcast)([policy_logits,32])
+           spatialOut = Concatenate()([spatialOut, broadcastPolicy])
 
-            conv3 = Conv2D(1, kernel_size=1, strides=(1,1), padding='same',name='conv3')(combinedSpatialNonSpatial)
+           spatialPolicy = Conv2D(1,kernel_size=1, strides=(1,1), padding='same',name='conv4')(spatialOut)
+           spatialPolicy = Flatten(name='flattenedConv3')(spatialPolicy)
+           spatialPolicy = Softmax(name='spatialPolicy')(spatialPolicy)
 
-            flatConv3 = Flatten(name='flatConv3')(conv3)
 
-            lstmInput = Lambda(self.expand_dims, name='lstmInput')(flatConv3)
-
-            self.NUM_LSTM = 100
-
-            hStateInput = Input(
-                shape=(self.NUM_LSTM,),
-                name='hStateInput'
-            )
-
-            cStateInput = Input(
-                shape=(self.NUM_LSTM,),
-                name='cStateInput'
-            )
-
-            lstm, hStates, cStates = LSTM(self.NUM_LSTM, return_state=True)(lstmInput, initial_state=[hStateInput, cStateInput])
-
-            broadcastLstm = Lambda(self.broadcast, name='breadcastLstm')(lstm)
-
-            spatialLstm = Concatenate(name='spatialLstm')([conv3, broadcastLstm])
-
-            # add in the coordinates
-            # xCords = K.constant(
-            #     [[[[x/self.ssize,] for x in range(self.ssize)] for _ in range(self.ssize)],],
-            #     dtype=tf.float32,
-            # )
-            # yCords = K.constant(
-            #     [[[[y/self.ssize,] for _ in range(self.ssize)] for y in range(self.ssize)],],
-            #     dtype=tf.float32,
-            # )
-            #
-            # xCords = Input(tensor = xCords)
-            # yCords = Input(tensor = yCords)
-            #
-            #
-            # xB =  Lambda(self.makeBatch)([(K.shape(screenInput)[0],1,1,1),xCords])
-            # yB =  Lambda(self.makeBatch)([(K.shape(screenInput)[0],1,1,1),yCords])
-
-            xB = Input(shape=(32,32,1), name='xb')
-            yB = Input(shape=(32,32,1), name='yb')
-
-            coordLstm = Concatenate(name='coordLstm')([spatialLstm, xB, yB])
-
-            # unravel the width dimension new shape = [None, 32^2, depth]
-            unraveled = Reshape((self.ssize**2, self.NUM_LSTM + 2 + 1), name='unraveled')(coordLstm)
-            # run 3 conv1d for q, k, v.
-            q = Conv1D(1, kernel_size=1, strides=(1,), name='qConv')(unraveled)
-            v = Conv1D(1, kernel_size=1, strides=(1,), name='vConv')(unraveled)
-            k = Conv1D(1, kernel_size=1, strides=(1,), name='kConv')(unraveled)
-
-            # must divide ssize^2
-            self.numSplits = 8
-
-            # split heads
-            qSplit = Reshape((self.numSplits,(self.ssize**2)//self.numSplits), name='qSplit')(q)
-            vSplit = Reshape((self.numSplits,(self.ssize**2)//self.numSplits), name='vSplit')(v)
-            kSplit = Reshape((self.numSplits,(self.ssize**2)//self.numSplits), name='kSplit')(k)
-
-            # run ops
-            # div = K.constant([(self.ssize/self.numSplits)**-.5], dtype=tf.float32)
-            # div = Input(tensor=div)
-            # divB = Lambda(self.makeBatch)([(K.shape(screenInput)[0],),div])
-            divB = Input(shape=(), name ='div')
-            qSplit = Multiply(name='dividedQ')([qSplit, divB])
-
-            qkMult = Lambda(self.matMultT, name='qkMult')([qSplit,kSplit])
-            weights = Softmax(name='weights')(qkMult)
-            attentionSplit = Lambda(self.matMult, name='attentionSplit')([weights, vSplit])
-            # concat heads
-
-            attention = Reshape((self.ssize**2,), name='attention')(attentionSplit)
-
-            fc1 = Dense(256, activation='relu',name='dense1')(attention)
-            fc2 = Dense(1, activation='linear',name='fc2')(fc1)
-            value = Lambda(self.Squeeze,name='value')(fc2)
-            policy = Dense(self.isize, activation='softmax',name='policy')(fc1)
-
-            attentionSpatial = Reshape((self.ssize, self.ssize), name='attentionSpatial')(attention)
-            attentionSpatial = Lambda(self.expand_dims_last)(attentionSpatial)
-            conv4 = Conv2D(1,kernel_size=1, strides=(1,1), padding='same',name='conv4')(attentionSpatial)
-            flatConv4 = Flatten(name='flattenedConv3')(conv4)
-            spatialPolicy = Softmax(name='spatialPolicy')(flatConv4)
-
-            conv5 = Conv2D(1, kernel_size=1, strides=(1,1), padding='same',name='conv5')(attentionSpatial)
-            flatConv5 = Flatten(name='flattenedConv5')(conv5)
-            bestRoach = Softmax(name='bestRoach')(flatConv5)
-
-            self.model = Model(
-                inputs=[screenInput, infoInput, customInput, hStateInput, cStateInput, xB, yB, divB],
-                outputs=[value, policy, spatialPolicy, hStates, cStates, bestRoach]
-            )
-            self.model._make_predict_function()
-
+           self.model = Model(
+               inputs=[screenInput, infoInput, customInput, hStateInput, cStateInput, xB, yB, divB],
+               outputs=[value, policy, spatialPolicy, hStates, cStates]
+           )
+           self.model._make_predict_function()
 
     def save_model(self, path, count):
         self.saver.save(self.session, path + '/model.pkl', count)
