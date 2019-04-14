@@ -6,8 +6,6 @@ import numpy as np
 import threading
 import time
 
-import sonnet as snt
-
 from tensorflow.keras.layers import Conv2D
 from tensorflow.keras.layers import GRU
 from tensorflow.keras.layers import LSTM
@@ -17,12 +15,14 @@ from tensorflow.keras.layers import Add
 from tensorflow.keras.layers import Flatten
 from tensorflow.keras.layers import Input
 from tensorflow.keras.layers import RepeatVector
+from tensorflow.keras.layers import MaxPool2D
 from tensorflow.keras.layers import Permute
 from tensorflow.keras.layers import Softmax
 from tensorflow.keras.layers import BatchNormalization
 from tensorflow.keras.layers import Reshape
 from tensorflow.keras.layers import Multiply
 from tensorflow.keras.layers import Conv1D
+from tensorflow.keras.layers import Conv2DTranspose
 from tensorflow.keras.models import Model
 from tensorflow.python.keras.layers import Lambda;
 import tensorflow.keras.backend as K
@@ -56,11 +56,11 @@ class Brain:
         K.set_session(self.session)
         K.manual_variable_initialization(True)
         self.build_net('/gpu:0')
+        self.default_graph = tf.get_default_graph()
+        self.summary_writer.add_graph(self.default_graph)
         self.build_model('/gpu:0')
         self.session.run(tf.global_variables_initializer())
-        self.default_graph = tf.get_default_graph()
         self.default_graph.finalize()
-        self.summary_writer.add_graph(self.default_graph)
         # self.debug = np.array([])
 
     def stop(self):
@@ -83,7 +83,6 @@ class Brain:
             self.cStateInput: cState,
             self.xB:np.array(U.makeX(len(screen),self.ssize)),
             self.yB:np.array(U.makeY(len(screen),self.ssize)),
-            self.divB:np.array(U.makeDiv(len(screen), (self.ssize//self.numSplits)**-.5))
             }
 
     def getTrainFeedDict(self, obs, action, attributed_act_id):
@@ -120,7 +119,7 @@ class Brain:
 
     def predict(self, feed):
         with self.session.as_default():
-            v, policy, spatialPolicy, hS, cS, _ = self.model.predict([
+            v, policy, spatialPolicy, hS, cS  = self.model.predict([
                 feed[self.screen],
                 feed[self.info],
                 feed[self.custom_inputs],
@@ -128,7 +127,6 @@ class Brain:
                 feed[self.cStateInput],
                 feed[self.xB],
                 feed[self.yB],
-                feed[self.divB]
             ])
 
             return policy, spatialPolicy, v, hS, cS
@@ -170,7 +168,7 @@ class Brain:
                 return
 
             batch = self.train_queue
-            self.train_queue = [[],[],[],[],[],[],[],[]]
+            self.train_queue = [[],[],[],[],[],[],[]]
 
 
         batch_train_feed = {
@@ -185,10 +183,8 @@ class Brain:
             self.advantage:np.array(batch[4], dtype=np.float32),
             self.hStateInput:np.array(batch[5], dtype=np.float32),
             self.cStateInput:np.array(batch[6], dtype=np.float32),
-            self.roach_location:np.array(batch[7], dtype=np.float32),
             self.xB:np.array(U.makeX(len(batch[0]), self.ssize)),
             self.yB:np.array(U.makeY(len(batch[0]), self.ssize)),
-            self.divB:np.array(U.makeDiv(len(batch[0]), (self.ssize//self.numSplits)**-.5)),
         }
 
         self.train(batch_train_feed)
@@ -201,9 +197,6 @@ class Brain:
 
     def getEntropy(self, policy, spatial_policy, valid_spatial):
         return tf.reduce_sum(policy * tf.log(policy + 1e-10), axis=1)# + valid_spatial * tf.reduce_sum(spatial_policy * tf.log(spatial_policy + 1e-10), axis=1)
-
-    def getMinRoachLoss(self, roach_target, roach_prediction):
-        return K.categorical_crossentropy(roach_target,roach_prediction)
 
     def build_model(self, dev):
         with tf.variable_scope('a3c') and tf.device(dev):
@@ -228,23 +221,18 @@ class Brain:
             self.custom_inputs = tf.placeholder(
                 tf.float32, [None, self.custom_input_size], name='custom_input')
             self.hStateInput = tf.placeholder(
-                tf.float32, [None, self.NUM_LSTM], name='h_state_input')
+                tf.float32, [None,] + [self.state_shape[i] for i in range(len(self.state_shape))], name='h_state_input')
             self.cStateInput = tf.placeholder(
-                tf.float32, [None, self.NUM_LSTM], name='c_state_input')
-            self.roach_location = tf.placeholder(
-                tf.float32, [None, self.ssize ** 2], name='roach_location'
-            )
+                tf.float32, [None,] + [self.state_shape[i] for i in range(len(self.state_shape))], name='c_state_input')
+
             self.xB = tf.placeholder(
-                tf.float32, [None, 32, 32 ,1], name='xB'
+                tf.float32, [None, 8, 8 ,1], name='xB'
             )
             self.yB = tf.placeholder(
-                tf.float32, [None, 32, 32 ,1], name='yB'
+                tf.float32, [None, 8, 8 ,1], name='yB'
             )
-            self.divB = tf.placeholder(
-                tf.float32, [None], name='divB'
-            )
-
-            self.value, self.policy, self.spatial_policy, _, _, self.roachPrediction = self.model([self.screen, self.info, self.custom_inputs, self.hStateInput, self.cStateInput, self.xB, self.yB, self.divB])
+            # print(self.screen.shape, self.info.shape, self.custom_inputs.shape, self.hStateInput.shape, self.cStateInput.shape, self.xB.shape, self.yB.shape)
+            self.value, self.policy, self.spatial_policy, _, _ = self.model([self.screen, self.info, self.custom_inputs, self.hStateInput, self.cStateInput, self.xB, self.yB])
             # This will get the probability of choosing a valid action. Given that we force it to choose from
             # the set of valid actions. The probability of an action is the probability the policy chooses
             # divided by the probability of a valid action
@@ -269,12 +257,9 @@ class Brain:
             value_loss = self.getValueLoss(self.value_target - self.value)
             entropy = self.getEntropy(
                 self.policy, self.spatial_policy, self.valid_spatial_action)
-            roachLoss = self.getMinRoachLoss(
-                self.roach_location, self.roachPrediction
-            )
 
 
-            loss = tf.reduce_mean(policy_loss + value_loss * .5 + entropy * .01 + .5 * roachLoss)
+            loss = tf.reduce_mean(policy_loss + value_loss * .5 + entropy * .01)
             # Build the optimizer
             global_step = tf.Variable(0)
             learning_rate_decayed = tf.train.exponential_decay(self.learning_rate,
@@ -298,8 +283,6 @@ class Brain:
                     'advantage', tf.reduce_mean(self.advantage)))
                 summary.append(tf.summary.scalar(
                     'loss', tf.reduce_mean(loss)))
-                summary.append(tf.summary.scalar(
-                    'roachLoss', tf.reduce_mean(roachLoss)))
                 self.summary_op = tf.summary.merge(summary)
             else:
                 self.summary_op = []
@@ -308,31 +291,26 @@ class Brain:
             # debug graph:
             self.summary_writer.add_graph(self.session.graph)
 
-    def broadcast(self, x):
-        x[0] = K.expand_dims(x[0], axis=1)
-        x[0] = K.expand_dims(x[0], axis=2)
-        return K.tile(x[0],(1, x[1], x[1], 1))
-
-    def expand_dims(self, x):
-        return K.expand_dims(x, 1)
-
-    def expand_dims_last(self, x):
-        return K.expand_dims(x, -1)
-
-    def Squeeze(self, x):
-        return K.squeeze(x,axis=-1)
-
-    def conv2DLSTM(self,x):
-         return snt.Conv2DLSTM(input_shape=(8,8,96+128),output_channels=96,kernel_shape=(4,4))(x[0], x[1])
-
     def splitQKV(self,x):
-        x = tf.transpose(x, [0,2,1,3])
+        x = Permute((2,1,3))(x)
         q,k,v = tf.split(x, [self.key_size, self.key_size, self.head_size], -1)
         q *= self.key_size ** -.05
-        return q, k, v
+        return [q, k, v]
 
-    def tf_matmul(self,x):
-        return tf.matmul(x[0],x[1],transpose_b=x[2])
+    def conv2DLSTM(self, inputs, state, output_channels, kernel_size, forgetBias = 1.0):
+        hidden, cell = state
+        inputConv = Conv2D(4 * output_channels, kernel_size = kernel_size, strides=(1,1), padding='same')(inputs)
+        hiddenConv = Conv2D(4 * output_channels, kernel_size = kernel_size, strides=(1,1), padding='same')(hidden)
+        nextHidden = Add()([inputConv, hiddenConv])
+
+        gates = tf.split(value = nextHidden, num_or_size_splits=4, axis=3)
+        inputGate, nextInput, forgetGate, outputGate = gates
+        nextCell = tf.sigmoid(forgetGate + forgetBias) * cell
+        nextCell += tf.sigmoid(inputGate) * tf.tanh(nextInput)
+        output = tf.tanh(nextCell) * tf.sigmoid(outputGate)
+
+        return [output, output, nextCell]
+
 
     def build_net(self,dev):
         with tf.variable_scope('a3c') and tf.device(dev):
@@ -361,21 +339,31 @@ class Brain:
            input2D = Dense(128, activation='relu')(input2D)
            input2D = Dense(64, activation='relu')(input2D)
 
-           broadcasted = Lambda(self.broadcast,name='broadcasting')([input2D, 8])
+           broadcasted = Lambda(K.expand_dims,arguments={'axis':1})(input2D)
+           broadcasted = Lambda(K.expand_dims,arguments={'axis':2})(broadcasted)
+           broadcasted = Lambda(K.tile,arguments={'n':(1,8,8,1)})(broadcasted)
 
            combinedSpatialNonSpatial = Concatenate(name='combinedConcat')([broadcasted, input3D])
+           self.state_shape = (8,8,96)
 
-           self.NUM_LSTM = 96
-
-           stateInput = Input(
-               shape=(self.NUM_LSTM,),
-               name='stateInput'
+           hStateInput = Input(
+               shape=self.state_shape,
            )
 
-           output2d, state = Lambda(self.conv2DLSTM)([combinedSpatialNonSpatial, stateInput])
+           cStateInput = Input(
+               shape=self.state_shape,
+           )
 
-           xB = Input(shape=(32,32,1), name='xb')
-           yB = Input(shape=(32,32,1), name='yb')
+
+           output2d, hState, cState= Lambda(self.conv2DLSTM, arguments={
+             'state':(hStateInput, cStateInput),
+             'output_channels':96,
+             'kernel_size':4,
+           })(combinedSpatialNonSpatial)
+
+
+           xB = Input(shape=(8,8,1), name='xb')
+           yB = Input(shape=(8,8,1), name='yb')
 
            coordLstm = Concatenate(name='coordLstm')([output2d, xB, yB])
 
@@ -384,55 +372,57 @@ class Brain:
            self.key_size = 32
 
            # unravel the width dimension new shape = [None, 32^2, depth]
-           unraveled = Flatten()(coordLstm)
+           unraveled = Reshape((8 * 8, 98))(coordLstm)
            self.qkv_size = self.head_size + self.key_size * 2
            self.total_size = self.qkv_size * self.num_heads
            qkv = Conv1D(self.total_size, kernel_size=1, strides=(1,), activation='linear')(unraveled)
            qkv = BatchNormalization()(qkv)
-           qkv = Reshape((8*8,self.num_heads,self.qkv_size))
+           qkv = Reshape((8*8,self.num_heads,self.qkv_size))(qkv)
 
            q, k, v = Lambda(self.splitQKV)(qkv)
 
-           dot = Lambda(self.tf_matmul)([q,k,True])
+           dot = Lambda(tf.matmul, arguments={'b':k,'transpose_b':True})(q)
            weights = Softmax()(dot)
-           output = Lambda(self.tf_matmul)([weights, v, False])
+           output = Lambda(tf.matmul, arguments={'b':v})(weights)
 
            output_t = Permute((2,1,3))(output)
 
            attention = Reshape((8*8,output_t.shape[2] * output_t.shape[3]))(output_t)
-           attention = Conv1D(coordLstm.shape[3], kernel_size=1, strides=(1,), activation='relu')(attention)
-           attention = Conv1D(coordLstm.shape[3], kernel_size=1, strides=(1,), activation='relu')(attention)
-
-
+           attention = Conv1D(self.state_shape[2] + 2, kernel_size=1, strides=(1,), activation='relu')(attention)
+           attention = Conv1D(self.state_shape[2] + 2, kernel_size=1, strides=(1,), activation='relu')(attention)
+           attention = Reshape((8,8,self.state_shape[2]+2))(attention)
            final = Add()([attention, coordLstm])
 
            nonSpatial = MaxPool2D(pool_size=(8,8))(final)
-           nonSpatial = Squeeze()(nonSpatial)
+           nonSpatial = Reshape((98,))(nonSpatial)
            nonSpatial = Concatenate()([nonSpatial, input2D])
 
 
-           vfc = Dense(256, activation='relu',name='dense1')(nonSpatial)
+           vfc = Dense(256, activation='relu',name='vfc')(nonSpatial)
            vfc = Dense(1, activation='linear',name='fc2')(vfc)
-           value = Lambda(self.Squeeze,name='value')(vfc)
+           value = Lambda(K.squeeze,arguments={'axis':-1},name='value')(vfc)
 
-           pfc = Dense(256, activation='relu',name='dense1')(nonSpatial)
-           policy_logits = Dense(self.isize, activation='none',name='policy')(pfc)
+           pfc = Dense(256, activation='relu',name='pfc')(nonSpatial)
+           policy_logits = Dense(self.isize ,name='policy')(pfc)
            policy = Softmax()(policy_logits)
 
-           spatialOut = Conv2DTranspose(32,kernel_size=4,strides=(2,2))()
-           spatialOut = Conv2DTranspose(16,kernel_size=4,strides=(2,2))()
 
-           broadcastPolicy = Lambda(self.broadcast)([policy_logits,32])
+           spatialOut = Conv2DTranspose(32,kernel_size=4,strides=(2,2),padding='same')(final)
+           spatialOut = Conv2DTranspose(16,kernel_size=4,strides=(2,2),padding='same')(spatialOut)
+
+           broadcastPolicy = Lambda(K.expand_dims,arguments={'axis':1})(policy_logits)
+           broadcastPolicy = Lambda(K.expand_dims,arguments={'axis':2})(broadcastPolicy)
+           broadcastPolicy = Lambda(K.tile,arguments={'n':(1,32,32,1)})(broadcastPolicy)
+
            spatialOut = Concatenate()([spatialOut, broadcastPolicy])
 
            spatialPolicy = Conv2D(1,kernel_size=1, strides=(1,1), padding='same',name='conv4')(spatialOut)
            spatialPolicy = Flatten(name='flattenedConv3')(spatialPolicy)
            spatialPolicy = Softmax(name='spatialPolicy')(spatialPolicy)
 
-
            self.model = Model(
-               inputs=[screenInput, infoInput, customInput, hStateInput, cStateInput, xB, yB, divB],
-               outputs=[value, policy, spatialPolicy, hStates, cStates]
+               inputs=[screenInput, infoInput, customInput, hStateInput, cStateInput, xB, yB],
+               outputs=[value, policy, spatialPolicy, hState, cState]
            )
            self.model._make_predict_function()
 

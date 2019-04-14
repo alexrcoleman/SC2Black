@@ -115,13 +115,11 @@ def getLowestHealthRoach(obs):
 use_coords = False
 
 def makeX(b, ssize):
-    return [[[[x] for x in range(ssize)] for _ in range(ssize)] for _ in range(b)]
+    return [[[[x] for x in range(8)] for _ in range(8)] for _ in range(b)]
 
 def makeY(b, ssize):
-    return [[[[y] for _ in range(ssize)] for y in range(ssize)] for _ in range(b)]
+    return [[[[y] for _ in range(8)] for y in range(8)] for _ in range(b)]
 
-def makeDiv(b, val):
-    return [val for _ in range(b)]
 
 def preprocess_screen(screen):
     layers = []

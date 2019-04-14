@@ -102,10 +102,10 @@ class A3CAgent(object):
         return scipy.signal.lfilter([1], [1, -gamma], x[::-1], axis=0)[::-1]
 
     # train_feed, p_feed, smask
-    def train(self, timestep, action_onehot, spatial_onehot, value, next_timestep, act, act_id, last_hS, last_cS, hState, cState, roachLoc):
+    def train(self, timestep, action_onehot, spatial_onehot, value, next_timestep, act, act_id, last_hS, last_cS, hState, cState):
         brain = self.brain
         feature_dict = brain.getTrainFeedDict(timestep, act, act_id)
-        self.memory.append((timestep.observation.rewardMod, feature_dict, action_onehot, spatial_onehot, value, last_hS, last_cS, roachLoc))
+        self.memory.append((timestep.observation.rewardMod, feature_dict, action_onehot, spatial_onehot, value, last_hS, last_cS))
         if len(self.memory) >= brain.N_STEP_RETURN or (next_timestep.last() and len(self.memory) > 0):
             memory = self.memory
             r = 0
@@ -114,7 +114,7 @@ class A3CAgent(object):
                 _, _, v, _, _ = brain.predict(brain.getPredictFeedDict(next_timestep, hState, cState))
                 v = v[0]
                 r += v
-            batch = [[],[],[],[],[],[],[],[]]
+            batch = [[],[],[],[],[],[],[]]
 
 
             rewards = np.asarray([x[0] for x in memory])
@@ -133,7 +133,6 @@ class A3CAgent(object):
             batch[4] = batch_adv.tolist()
             batch[5] = [np.asarray(x[5]) for x in memory]
             batch[6] = [np.asarray(x[6]) for x in memory]
-            batch[7] = [np.asarray(x[7]) for x in memory]
 
             brain.add_train(batch)
             self.memory = []

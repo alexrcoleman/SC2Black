@@ -50,8 +50,8 @@ class Environment(threading.Thread):
         timestep = self.env.reset()[0]
         last_net_act_id = 0
         self.addInputs(timestep, num_frames, last_net_act_id)
-        hState = np.zeros(self.brain.NUM_LSTM)
-        cState = np.zeros(self.brain.NUM_LSTM)
+        hState = np.zeros(self.brain.state_shape)
+        cState = np.zeros(self.brain.state_shape)
         while not (self.stop_signal or self.brain.stop_signal):
             time.sleep(.00001) # yield
             #self.startBench()
@@ -67,10 +67,6 @@ class Environment(threading.Thread):
                         timestep.observation.available_actions, index)
             #self.bench("part1")
 
-            roachLocation = np.zeros([self.brain.ssize ** 2])
-            roachLoc = U.getLowestHealthRoach(timestep)
-            roachLocation[roachLoc[0] * self.brain.ssize + roachLoc[1]] = 1
-
             last_hS = hState
             last_cS = cState
             last_net_act_id, act, action_onehot, spatial_onehot, value, hState, cState = self.agent.act(timestep,hState,cState)
@@ -82,7 +78,7 @@ class Environment(threading.Thread):
             is_done = (num_frames >= self.max_frames) or timestep.last()
 
             if FLAGS.training:
-                self.agent.train(last_timestep, action_onehot, spatial_onehot, value, timestep, act, last_net_act_id, last_hS, last_cS, hState, cState, roachLocation)
+                self.agent.train(last_timestep, action_onehot, spatial_onehot, value, timestep, act, last_net_act_id, last_hS, last_cS, hState, cState)
             #self.bench("train")
             if is_done:
                 score = timestep.observation["score_cumulative"][0]
