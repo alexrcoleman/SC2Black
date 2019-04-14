@@ -44,12 +44,13 @@ class Brain:
         self.stop_signal = False
 
         self.lock_queue = threading.Lock()
-        self.train_queue = [[], [], [], [], [], [], [], []]
+        self.train_queue = [[], [], [], [], [], [], []]
 
 
         self.counter_lock = threading.Lock()
         self.training_counter = 0
-
+        tf.reset_default_graph()
+        K.clear_session()
         config = tf.ConfigProto(allow_soft_placement=True)
         config.gpu_options.allow_growth = True
         self.session = tf.Session(config=config)
@@ -123,10 +124,10 @@ class Brain:
                 feed[self.screen],
                 feed[self.info],
                 feed[self.custom_inputs],
-                feed[self.hStateInput],
-                feed[self.cStateInput],
                 feed[self.xB],
                 feed[self.yB],
+                feed[self.hStateInput],
+                feed[self.cStateInput],
             ])
 
             return policy, spatialPolicy, v, hS, cS
@@ -135,7 +136,6 @@ class Brain:
     def train(self, feed):
         feed[self.learning_rate] = self.lr
         feed[self.entropy_rate] = self.er
-
         _, summary = self.session.run([self.train_op, self.summary_op], feed_dict=feed)
         with self.counter_lock:
             local_counter = self.training_counter
@@ -170,7 +170,6 @@ class Brain:
             batch = self.train_queue
             self.train_queue = [[],[],[],[],[],[],[]]
 
-
         batch_train_feed = {
             self.value_target:np.squeeze(np.array(batch[0], dtype=np.float32)),
             self.screen:np.asarray([x[self.screen] for x in batch[1]],dtype=np.float32),
@@ -180,9 +179,9 @@ class Brain:
             self.valid_action:np.asarray([x[self.valid_action] for x in batch[1]],dtype=np.float32),
             self.action_selected:np.array(batch[2], dtype=np.float32),
             self.spatial_action_selected:np.array(batch[3], dtype=np.float32),
-            self.advantage:np.array(batch[4], dtype=np.float32),
             self.hStateInput:np.array(batch[5], dtype=np.float32),
             self.cStateInput:np.array(batch[6], dtype=np.float32),
+            self.advantage:np.array(batch[4], dtype=np.float32),
             self.xB:np.array(U.makeX(len(batch[0]), self.ssize)),
             self.yB:np.array(U.makeY(len(batch[0]), self.ssize)),
         }
@@ -224,7 +223,6 @@ class Brain:
                 tf.float32, [None,] + [self.state_shape[i] for i in range(len(self.state_shape))], name='h_state_input')
             self.cStateInput = tf.placeholder(
                 tf.float32, [None,] + [self.state_shape[i] for i in range(len(self.state_shape))], name='c_state_input')
-
             self.xB = tf.placeholder(
                 tf.float32, [None, 8, 8 ,1], name='xB'
             )
@@ -232,7 +230,7 @@ class Brain:
                 tf.float32, [None, 8, 8 ,1], name='yB'
             )
             # print(self.screen.shape, self.info.shape, self.custom_inputs.shape, self.hStateInput.shape, self.cStateInput.shape, self.xB.shape, self.yB.shape)
-            self.value, self.policy, self.spatial_policy, _, _ = self.model([self.screen, self.info, self.custom_inputs, self.hStateInput, self.cStateInput, self.xB, self.yB])
+            self.value, self.policy, self.spatial_policy, _, _ = self.model([self.screen, self.info, self.custom_inputs,self.xB,self.yB, self.hStateInput, self.cStateInput])
             # This will get the probability of choosing a valid action. Given that we force it to choose from
             # the set of valid actions. The probability of an action is the probability the policy chooses
             # divided by the probability of a valid action
@@ -348,10 +346,12 @@ class Brain:
 
            hStateInput = Input(
                shape=self.state_shape,
+               name='hStateInput'
            )
 
            cStateInput = Input(
                shape=self.state_shape,
+               name='cStateInput'
            )
 
 
@@ -421,7 +421,7 @@ class Brain:
            spatialPolicy = Softmax(name='spatialPolicy')(spatialPolicy)
 
            self.model = Model(
-               inputs=[screenInput, infoInput, customInput, hStateInput, cStateInput, xB, yB],
+               inputs=[screenInput, infoInput, customInput,xB, yB,  hStateInput, cStateInput],
                outputs=[value, policy, spatialPolicy, hState, cState]
            )
            self.model._make_predict_function()
