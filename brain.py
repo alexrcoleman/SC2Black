@@ -293,7 +293,7 @@ class Brain:
 
     def build_net(self,dev):
         with tf.variable_scope('a3c') and tf.device(dev):
-           self.state_shape = (8,8,96)
+           self.state_shape = (8,8,32)
            self.screenInput = tf.placeholder(
                tf.float32, [None, U.screen_channel(), self.ssize, self.ssize], name='screen')
            self.infoInput = tf.placeholder(
@@ -313,14 +313,14 @@ class Brain:
 
            input3D = Permute((2,3,1))(self.screenInput)
            for i in range(2):
-               input3D = Conv2D(32, kernel_size=4, strides=(2,2), padding='same')(input3D)
-               input3D = Conv2D(64, kernel_size=3, strides=(1,1), padding='same')(input3D)
-               input3D = Conv2D(94, kernel_size=3, strides=(1,1), padding='same')(input3D)
+               input3D = Conv2D(16, kernel_size=4, strides=(2,2), padding='same')(input3D)
+               input3D = Conv2D(32, kernel_size=3, strides=(1,1), padding='same')(input3D)
+               input3D = Conv2D(32, kernel_size=3, strides=(1,1), padding='same')(input3D)
 
 
            input2D = Concatenate(name='nonSpatialInputConcat')([self.infoInput, self.customInput])
-           input2D = Dense(128, activation='relu')(input2D)
-           input2D = Dense(64, activation='relu')(input2D)
+           input2D = Dense(32, activation='relu')(input2D)
+           input2D = Dense(16, activation='relu')(input2D)
 
            broadcasted = Lambda(K.expand_dims,arguments={'axis':1})(input2D)
            broadcasted = Lambda(K.expand_dims,arguments={'axis':2})(broadcasted)
@@ -332,18 +332,18 @@ class Brain:
 
            output2d,self.hState, self.cState= Lambda(self.conv2DLSTM, arguments={
              'state':(self.hStateInput, self.cStateInput),
-             'output_channels':96,
+             'output_channels':32,
              'kernel_size':4,
            })(combinedSpatialNonSpatial)
 
            coordLstm = Concatenate(name='coordLstm')([output2d, self.xB, self.yB])
 
            self.num_heads = 2
-           self.head_size = 32
-           self.key_size = 32
+           self.head_size = 16
+           self.key_size = 16
 
            # unravel the width dimension new shape = [None, 32^2, depth]
-           unraveled = Reshape((8 * 8, 98))(coordLstm)
+           unraveled = Reshape((8 * 8, 34))(coordLstm)
            self.qkv_size = self.head_size + self.key_size * 2
            self.total_size = self.qkv_size * self.num_heads
            qkv = Conv1D(self.total_size, kernel_size=1, strides=(1,), activation='linear')(unraveled)
@@ -365,15 +365,15 @@ class Brain:
            final = Add()([attention, coordLstm])
 
            nonSpatial = MaxPool2D(pool_size=(8,8))(final)
-           nonSpatial = Reshape((98,))(nonSpatial)
+           nonSpatial = Reshape((34,))(nonSpatial)
            nonSpatial = Concatenate()([nonSpatial, input2D])
 
 
-           vfc = Dense(256, activation='relu',name='vfc')(nonSpatial)
+           vfc = Dense(32, activation='relu',name='vfc')(nonSpatial)
            vfc = Dense(1, activation='linear',name='fc2')(vfc)
            self.value = Lambda(K.squeeze,arguments={'axis':-1},name='value')(vfc)
 
-           pfc = Dense(256, activation='relu',name='pfc')(nonSpatial)
+           pfc = Dense(32, activation='relu',name='pfc')(nonSpatial)
            policy_logits = Dense(self.isize ,name='policy')(pfc)
            self.policy = Softmax()(policy_logits)
 
