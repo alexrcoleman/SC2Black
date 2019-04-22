@@ -1,4 +1,5 @@
 # SC2Black
+In order to run any of the code, you will need a lot of things installed and setup. Please follow the setup guides at https://github.com/deepmind/pysc2 and https://www.tensorflow.org/install (or https://www.tensorflow.org/install/gpu for GPU support). Use `pip install` to add any missing packages. We found the easiest tensorflow setup to be using anaconda.
 ## StarCraftII Minigames
 To train the StarCraftII agent, use the command `py main.py`
 
